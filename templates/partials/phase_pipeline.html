@@ -1,0 +1,29 @@
+{# v3-style phase timeline: 28px circles + phase names + status text.
+   Uses stage-based dot mapping: plan/develop → Impl, review/test → Verif. #}
+{% set phase_idx = phases.index(task.current_phase) if task.current_phase in phases else -1 %}
+{% set _dot_map = {"plan":1, "develop":1, "review":3, "test":3} %}
+{% set display_idx = _dot_map.get(task.current_phase, phase_idx) %}
+{% set is_done = task.status == 'done' %}
+<div class="phase-timeline">
+  {% for p in phases %}
+    {% set is_past = loop.index0 < display_idx or is_done %}
+    {% set is_current = (loop.index0 == display_idx) and not is_done %}
+    {% set status_text = 'done' if is_past else (task.status if is_current else 'pending') %}
+    <div class="phase-step {{ status_text }}">
+      <div class="phase-circle">{{ loop.index }}</div>
+      <div class="phase-info">
+        <div class="phase-name">{{ p|capitalize }}</div>
+        <div class="phase-status">
+          {%- if is_past %}✓ completed
+          {%- elif is_current and task.status == 'running' %}⟳ running
+          {%- elif is_current and task.status == 'failed' %}✗ failed
+          {%- else %}— pending
+          {%- endif %}
+        </div>
+      </div>
+    </div>
+    {% if not loop.last %}
+      <div class="phase-connector {{ status_text }}"></div>
+    {% endif %}
+  {% endfor %}
+</div>

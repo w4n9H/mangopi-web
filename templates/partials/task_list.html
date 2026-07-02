@@ -1,0 +1,9 @@
+{# Renders the full task list. Each task item subscribes to its own SSE
+   stream via hx-sse, so phase dots update live. #}
+{% if tasks %}
+  {% for task in tasks %}
+    {% include "partials/task_item.html" with context %}
+  {% endfor %}
+{% else %}
+  <div class="empty">No tasks yet. Click <b>+ New</b> to start.</div>
+{% endif %}

@@ -1,0 +1,167 @@
+{# SPA partial: task detail loaded into index.html via HTMX OOB swaps.
+   Used in two modes:
+   • Initial load (sidebar click): wraps events in #phase-events-list so
+     they land inside #phase-content; sets up a persistent SSE trigger.
+   • Realtime update (?realtime=1, SSE-triggered): emits OOB header +
+     the events directly. The originating <div hx-get hx-target="#phase-
+     events-list" hx-swap="innerHTML"> makes HTMX replace the existing
+     list's innerHTML with the new events. #}
+{% set is_realtime = request.query_params.get('realtime') == '1' %}
+
+{# ── Header OOB swaps (both modes) ─────────────────────────────────── #}
+<span id="task-title" hx-swap-oob="true">{{ task.name }}</span>
+
+<span id="task-id-meta" hx-swap-oob="true">
+  <code style="font-size: 11px;">{{ task.id }}</code>
+</span>
+
+<span id="task-status-meta" hx-swap-oob="true"
+      class="task-status-pill {{ task.status }}">{{ task.status }}</span>
+
+<span id="task-phase-meta" hx-swap-oob="true">
+  {% if task.current_phase %}
+  phase <b style="color: var(--text);">{{ task.current_phase }}</b>
+  {% else %}
+  —
+  {% endif %}
+</span>
+
+<div id="phase-timeline-placeholder" hx-swap-oob="true">
+  {% include "partials/phase_pipeline.html" %}
+</div>
+
+{# ── Events list ───────────────────────────────────────────────────── #}
+{% if not is_realtime %}<div id="phase-events-list" data-last-seq="{{ events|map(attribute='seq')|max if events else 0 }}">{% endif %}
+
+{% if not is_realtime %}
+<div class="phase-header-card">
+  <div class="phase-header-card-top">
+    <span id="phase-status-tag" class="phase-tag {{ task.status }}">{{ task.status }}</span>
+    <span style="color: var(--text-muted); font-size: 11px;">
+      {{ events|length }} events recorded
+    </span>
+  </div>
+  <div class="phase-goal-label">Goal</div>
+  <div class="phase-goal">{{ task.goal }}</div>
+</div>
+{% endif %}
+
+  {% set ns = namespace(current_stage='', last_rendered_stage=request.query_params.get('last_stage', '')) %}
+  {% set _stage_map = {"plan":"Implementer", "develop":"Implementer",
+                        "review":"Verifier", "test":"Verifier",
+                        "push":"Push"} %}
+  {% for ev in events %}
+    {% set p = ev.payload|from_json %}
+
+    {# ── iter: detect stage transition, render header (initial load only) ── #}
+    {% if ev.type == 'iter' %}
+      {% set _stage = 'Updater' if p.agent == 'updater' else _stage_map.get(p.phase, '') %}
+      {% if _stage and _stage != ns.current_stage %}
+        {% set ns.current_stage = _stage %}
+        {% if _stage != ns.last_rendered_stage %}
+        <div class="stage-header" data-event-stage="{{ _stage }}" data-event-seq="{{ ev.seq }}">
+          <div class="stage-header-line"></div>
+          <span class="stage-header-label">{{ _stage }}</span>
+          <div class="stage-header-line"></div>
+          <span class="stage-header-detail">
+            {% if _stage == 'Implementer' %}plan + develop
+            {% elif _stage == 'Verifier' %}review + test
+            {% elif _stage == 'Push' %}finalize
+            {% elif _stage == 'Updater' %}correction
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
+      {% endif %}
+
+    {# ── tool call ── #}
+    {% elif ev.type == 'tool' %}
+      <div class="tool-card" data-event-seq="{{ ev.seq }}">
+        <div class="tool-header">
+          <span class="tool-name">{{ p.name|default('?') }}</span>
+          <span class="tool-args">{{ p.args_preview|default('') }}</span>
+          <span class="tool-status call">call</span>
+        </div>
+      </div>
+
+    {# ── tool result ── #}
+    {% elif ev.type == 'tool_result' %}
+      <div class="tool-card result" data-event-seq="{{ ev.seq }}">
+        <div class="tool-header">
+          <span class="tool-name">{{ p.name|default('?') }}</span>
+          <span class="tool-status {{ 'success' if p.ok else 'fail' }}">
+            {{ 'ok' if p.ok else 'fail' }}
+          </span>
+        </div>
+        {% if p.snippet is defined and p.snippet %}
+          <div class="tool-content">{{ p.snippet }}</div>
+        {% endif %}
+      </div>
+
+    {# ── verdict ── #}
+    {% elif ev.type == 'verdict' %}
+      {% set v = p.verdict|default('') %}
+      <div class="verdict-slim {{ 'fail' if 'FAIL' in v else 'pass' }}"
+           data-event-seq="{{ ev.seq }}">
+        {{ '✗' if 'FAIL' in v else '✔' }} {{ v }}
+      </div>
+
+    {# ── complete / exit ── #}
+    {% elif ev.type == 'complete' %}
+      <div class="verdict-slim pass" data-event-seq="{{ ev.seq }}">✔ Complete</div>
+    {% elif ev.type == 'exit' %}
+      <div class="exit-code" data-event-seq="{{ ev.seq }}">⏹ exit {{ p.code|default('?') }}</div>
+
+    {# ── error ── #}
+    {% elif ev.type == 'error' %}
+      <div class="verdict-slim fail" data-event-seq="{{ ev.seq }}">
+        ✗ {{ p.message|default('error') }}
+      </div>
+
+    {% endif %}
+    {# start, phase, usage events are silently skipped #}
+  {% endfor %}
+{% if is_realtime %}
+{# Realtime: OOB-update the status tag in the phase-header-card #}
+<span id="phase-status-tag" hx-swap-oob="outerHTML"
+      class="phase-tag {{ task.status }}">{{ task.status }}</span>
+{% endif %}
+{% if not is_realtime %}</div>{% endif %}
+
+{# ── Persistent SSE listener (initial load only) ───────────────────── #}
+{% if not is_realtime and task.status not in ('done', 'failed') %}
+<div id="phase-sse-listener" hx-sse="connect:/events/{{ task.id }}">
+  <div hx-trigger="sse:phase, sse:iter, sse:tool, sse:tool_result, sse:verdict, sse:complete, sse:exit, sse:error"
+       hx-get="/tasks/{{ task.id }}?realtime=1"
+       hx-vals='js:{
+         "last_seq": parseInt(document.getElementById("phase-events-list")?.dataset.lastSeq || "0", 10),
+         "last_stage": document.getElementById("phase-events-list")?.dataset.lastStage || ""
+       }'
+       hx-target="#phase-events-list"
+       hx-swap="beforeend"
+       hx-on::after-request="
+         const els = document.querySelectorAll('#phase-events-list [data-event-seq]');
+         let maxSeq = 0;
+         for (const e of els) {
+           const s = parseInt(e.dataset.eventSeq, 10);
+           if (!isNaN(s) && s > maxSeq) maxSeq = s;
+         }
+         const list = document.getElementById('phase-events-list');
+         if (list && maxSeq > 0) list.dataset.lastSeq = String(maxSeq);
+         // Track the last rendered stage across batches
+         if (list) {
+           const stages = list.querySelectorAll('[data-event-stage]');
+           if (stages.length > 0) {
+             list.dataset.lastStage = stages[stages.length - 1].dataset.eventStage;
+           }
+         }
+         const content = document.getElementById('phase-content');
+         if (content) content.scrollTop = content.scrollHeight;
+       "
+       style="display:none"></div>
+</div>
+{% endif %}
+
+{% if is_realtime and task.status in ('done', 'failed') %}
+<div id="phase-sse-listener" hx-swap-oob="delete" style="display:none"></div>
+{% endif %}

@@ -1,0 +1,87 @@
+{# v4 task card — 4 rows.
+   Row 1 · name (left) + relative time (right, space-between)
+   Row 2 · task-id (small gray)
+   Row 3 · 5-phase timeline (unchanged)
+   Row 4 · summary badge (left-aligned)
+   v0.1.1: SSE only for active tasks — done/failed skip SSE.
+   v0.1.2: /advance returns OOB updates; card is never replaced.
+   v0.1.3: 4-row layout. #}
+{% set phase_idx = phases.index(task.current_phase) if task.current_phase in phases else -1 %}
+{% set is_active = task.status not in ('done', 'failed') %}
+<div class="task-item {{ task.status }}"
+     id="task-{{ task.id }}"
+     data-task-id="{{ task.id }}"
+     data-phase="{{ task.current_phase or 'queued' }}"
+     hx-get="/tasks/{{ task.id }}"
+     hx-target="#phase-content"
+     hx-swap="innerHTML"
+     style="cursor: pointer;">
+
+  {# Row 1 — task name (left) + relative time (right, space-between) #}
+  <div class="task-item-header-row">
+    <span class="task-item-name">{{ task.name }}</span>
+    <span id="task-{{ task.id }}-ago" class="task-item-ago">
+      {% if task.last_event_at %}{{ task.last_event_at|ago }}{% endif %}
+    </span>
+  </div>
+
+  {# Row 2 — task-id as git-branch style + icon #}
+  <div class="task-item-id-row">
+    <svg class="git-branch-icon" viewBox="0 0 16 16" width="10" height="12" fill="currentColor">
+      <path d="M9.5 3.25a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.493 2.493 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25Zm-6 0a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Zm8.25-.75a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5ZM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Z"/>
+    </svg>
+    <code class="task-item-branch-id">task/{{ task.id }}</code>
+  </div>
+
+  {# Row 3 — 5-phase timeline (Plan→Develop→Review→Test→Push) #}
+  <div id="task-{{ task.id }}-progress" class="task-item-progress">
+    {% for p in phases %}
+      {% set is_past    = loop.index0 < phase_idx or task.status == 'done' %}
+      {% set is_running = (loop.index0 == phase_idx) and task.status == 'running' %}
+      {% set is_failed  = (loop.index0 == phase_idx) and task.status == 'failed' %}
+      <div class="task-progress-dot {{ 'done' if is_past else ('running' if is_running else ('failed' if is_failed else '')) }}"></div>
+      {% if not loop.last %}
+        <div class="task-progress-connector {{ 'done' if is_past or (task.status == 'done' and loop.index0 < phase_idx) else ('running' if is_running else ('failed' if is_failed else '')) }}"></div>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  {# Row 4 — summary badge (left) + action menu (right) #}
+  <div id="task-{{ task.id }}-summary" class="task-item-summary-row">
+    <span class="task-summary-badge {{ task.status }}">
+      {% set _done_count = phase_idx + 1 if phase_idx >= 0 else 0 %}
+      {% if task.status == 'done' %}
+        {{ task.max_iter }}/{{ task.max_iter }} Done
+      {% else %}
+        {{ _done_count }}/{{ task.max_iter }} {{ task.status|capitalize }}
+      {% endif %}
+    </span>
+
+    <div class="task-menu" x-data="{ open: false }" @click.outside="open = false">
+      <button class="task-menu-btn" @click.stop="open = !open"
+              title="Actions">⋯</button>
+      <div class="task-menu-dropdown" x-show="open" x-cloak @click.stop>
+        <button class="task-menu-item"
+                hx-delete="/tasks/{{ task.id }}"
+                hx-target="#task-{{ task.id }}"
+                hx-swap="delete"
+                hx-trigger="click consume"
+                hx-confirm="Delete &ldquo;{{ task.name | e }}&rdquo;?"
+                @click="open = false">
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+
+  {% if is_active %}
+  <div id="task-{{ task.id }}-sse" hx-sse="connect:/events/{{ task.id }}"
+       style="display:none">
+    <div id="task-{{ task.id }}-sse-trigger"
+         hx-trigger="sse:phase, sse:iter, sse:verdict, sse:complete, sse:exit, sse:error"
+         hx-post="/tasks/{{ task.id }}/advance"
+         hx-target="#advance-noop"
+         hx-swap="innerHTML"></div>
+  </div>
+  {% endif %}
+</div>

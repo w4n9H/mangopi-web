@@ -1,0 +1,58 @@
+{# OOB-only partial for live card updates.
+   Response of POST /tasks/{id}/advance. OOB updates refresh row 1
+   (ago time), row 3 (timeline) and row 4 (summary badge) without
+   replacing the card. #}
+{% set phase_idx = phases.index(task.current_phase) if task.current_phase in phases else -1 %}
+
+{# Row 1 — relative time #}
+<span id="task-{{ task.id }}-ago" hx-swap-oob="outerHTML"
+      class="task-item-ago">{{ task.last_event_at|ago if task.last_event_at else "" }}</span>
+
+{# Row 3 — 5-phase timeline (sequential) #}
+<div id="task-{{ task.id }}-progress"
+     hx-swap-oob="outerHTML"
+     class="task-item-progress">
+  {% for p in phases %}
+    {% set is_past    = loop.index0 < phase_idx or task.status == 'done' %}
+    {% set is_running = (loop.index0 == phase_idx) and task.status == 'running' %}
+    {% set is_failed  = (loop.index0 == phase_idx) and task.status == 'failed' %}
+    <div class="task-progress-dot {{ 'done' if is_past else ('running' if is_running else ('failed' if is_failed else '')) }}"></div>
+    {% if not loop.last %}
+      <div class="task-progress-connector {{ 'done' if is_past else ('running' if is_running else ('failed' if is_failed else '')) }}"></div>
+    {% endif %}
+  {% endfor %}
+</div>
+
+{# Row 4 — summary badge #}
+<div id="task-{{ task.id }}-summary"
+     hx-swap-oob="outerHTML"
+     class="task-item-summary-row">
+  <span class="task-summary-badge {{ task.status }}">
+    {% set _done_count = phase_idx + 1 if phase_idx >= 0 else 0 %}
+    {% if task.status == 'done' %}
+      {{ task.max_iter }}/{{ task.max_iter }} Done
+    {% else %}
+      {{ _done_count }}/{{ task.max_iter }} {{ task.status|capitalize }}
+    {% endif %}
+  </span>
+
+  <div class="task-menu" x-data="{ open: false }" @click.outside="open = false">
+    <button class="task-menu-btn" @click.stop="open = !open"
+            title="Actions">⋯</button>
+    <div class="task-menu-dropdown" x-show="open" x-cloak @click.stop>
+      <button class="task-menu-item"
+              hx-delete="/tasks/{{ task.id }}"
+              hx-target="#task-{{ task.id }}"
+              hx-swap="delete"
+              hx-trigger="click consume"
+              hx-confirm="Delete &ldquo;{{ task.name | e }}&rdquo;?"
+              @click="open = false">
+        Delete
+      </button>
+    </div>
+  </div>
+</div>
+
+{% if task.status in ('done', 'failed') %}
+<div id="task-{{ task.id }}-sse" hx-swap-oob="delete" style="display:none"></div>
+{% endif %}
