@@ -1,5 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="theme-dark"
+      x-data="{ theme: localStorage.getItem('mangopi-theme') || 'light' }"
+      x-init="$watch('theme', val => {
+        document.documentElement.className = 'theme-' + val;
+        localStorage.setItem('mangopi-theme', val);
+      })"
+      :class="'theme-' + theme">
 <head>
   <meta charset="UTF-8">
   <title>{% block title %}mangopi-web{% endblock %}</title>
@@ -22,14 +28,14 @@
     margin: 0;
     overflow: hidden;
     font-family: 'Outfit', sans-serif;
-    background: #0f0f12;
-    color: #e5e5e5;
+    background: var(--bg);
+    color: var(--text);
     font-size: 14px;
     line-height: 1.5;
     min-height: 100vh;
   }
 
-  :root {
+  .theme-dark {
     --bg: #0f0f12;
     --bg-elevated: #18181d;
     --bg-card: #1c1c22;
@@ -53,6 +59,32 @@
     --yellow: #fbbf24;
     --purple: #a78bfa;
     --purple-dim: rgba(167, 139, 250, 0.12);
+  }
+
+  .theme-light {
+    --bg: #ecece9;
+    --bg-elevated: #f8f8f6;
+    --bg-card: #ffffff;
+    --bg-card-hover: #f2f2ee;
+    --border: rgba(0, 0, 0, 0.06);
+    --border-strong: rgba(0, 0, 0, 0.11);
+    --text: #1c1917;
+    --text-muted: #78716c;
+    --text-dim: #a8a29e;
+    --primary: #059669;
+    --primary-dim: rgba(5, 150, 105, 0.08);
+    --primary-glow: rgba(5, 150, 105, 0.18);
+    --orange: #d97706;
+    --orange-dim: rgba(217, 119, 6, 0.08);
+    --cyan: #0891b2;
+    --cyan-dim: rgba(8, 145, 178, 0.08);
+    --red: #dc2626;
+    --red-dim: rgba(220, 38, 38, 0.08);
+    --blue: #2563eb;
+    --blue-dim: rgba(37, 99, 235, 0.08);
+    --yellow: #ca8a04;
+    --purple: #7c3aed;
+    --purple-dim: rgba(124, 58, 237, 0.08);
   }
 
   /* ===== Top Status Bar ===== */
@@ -163,6 +195,40 @@
   .sidebar-search {
     padding: 6px 10px 8px;
   }
+  .sidebar-dashboard {
+    padding: 6px 10px 0;
+    display: flex;
+    gap: 4px;
+  }
+  .sd-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 4px 5px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+  }
+  .sd-card-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .sd-card-label {
+    font-size: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+  }
+  .sd-card:first-child { border-color: var(--cyan); }
+  .sd-card:first-child .sd-card-value { color: var(--cyan); }
+  .sd-card.accent-active { border-color: var(--primary); }
+  .sd-card.accent-active .sd-card-value { color: var(--primary); }
+  .sd-card.accent-health { border-color: var(--orange); }
+  .sd-card.accent-health .sd-card-value { color: var(--orange); }
   .search-input {
     width: 100%;
     padding: 6px 10px;
@@ -399,7 +465,7 @@
     align-items: center;
     justify-content: center;
   }
-  .icon-btn:hover { background: rgba(255,255,255,0.1); }
+  .icon-btn:hover { background: rgba(128,128,128,0.12); }
   .icon-btn.danger { color: var(--red); }
 
   /* ===== Phase Timeline (the hero) ===== */
@@ -432,7 +498,7 @@
   .phase-step.done .phase-circle {
     background: var(--primary);
     border-color: var(--primary);
-    color: #042f1e;
+    color: white;
   }
   .phase-step.running .phase-circle {
     background: var(--orange);
@@ -606,6 +672,31 @@
     letter-spacing: 0.05em;
     font-weight: 600;
   }
+  .thinking-text {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    margin-top: 4px;
+  }
+
+  /* ── Output block (tool/agent stdout) ────────────────────────────────── */
+  .output-block {
+    margin-bottom: 14px;
+    padding: 8px 12px;
+    background: rgba(16, 185, 129, 0.03);
+    border-left: 2px solid var(--primary);
+    border-radius: 0 6px 6px 0;
+  }
+  .output-content {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    max-height: 160px;
+    overflow-y: auto;
+  }
 
   .tool-card {
     background: rgba(255,255,255,0.02);
@@ -758,6 +849,9 @@
   .right-section {
     border-bottom: 1px solid var(--border);
     padding: 14px 16px;
+    background: var(--bg-card);
+    margin: 0 0 6px;
+    border-radius: 6px;
   }
   .right-section-header {
     display: flex; align-items: center; justify-content: space-between;
@@ -972,7 +1066,7 @@
     content: ""; position: absolute;
     left: 4px; top: 1px;
     width: 4px; height: 8px;
-    border: solid #042f1e;
+    border: solid var(--primary);
     border-width: 0 2px 2px 0;
     transform: rotate(45deg);
   }
@@ -1000,7 +1094,7 @@
   .btn-secondary:hover { background: rgba(255,255,255,0.04); }
   .btn-primary {
     background: var(--primary);
-    color: #042f1e;
+    color: white;
     border: none;
     font-weight: 600;
   }
@@ -1037,6 +1131,10 @@
         <span id="token-pct">0%</span>
       </div>
       <div class="divider"></div>
+      <button class="icon-btn" @click="theme = theme === 'light' ? 'dark' : 'light'"
+              style="width: 28px; height: 28px; padding: 0;"
+              title="Toggle theme"
+              x-text="theme === 'light' ? '🌙' : '☀️'"></button>
       <button id="settings-btn" class="icon-btn" title="settings (v0.2)"
               style="width: 28px; height: 28px; padding: 0;">⚙</button>
       <a href="/health" style="font-size: 12px; color: var(--text-muted);">/health</a>

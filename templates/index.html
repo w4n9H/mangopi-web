@@ -13,6 +13,27 @@
       <div style="font-size: 11px; color: var(--text-muted);" id="task-count">0</div>
     </div>
 
+    <!-- Mini dashboard: system status -->
+    <div class="sidebar-dashboard"
+         x-data="{ mode: '—', active: 0, maxC: 3, health: '—' }"
+         x-init="fetch('/health').then(r => r.json()).then(d => {
+           mode = d.mode; active = d.active; maxC = d.max_concurrent;
+           health = d.web === 'ok' ? '✓ ok' : '✗ fail';
+         });">
+      <div class="sd-card">
+        <span class="sd-card-value" x-text="mode"></span>
+        <span class="sd-card-label">Mode</span>
+      </div>
+      <div class="sd-card accent-active">
+        <span class="sd-card-value" x-text="active + '/' + maxC"></span>
+        <span class="sd-card-label">Active</span>
+      </div>
+      <div class="sd-card accent-health">
+        <span class="sd-card-value" x-text="health"></span>
+        <span class="sd-card-label">Health</span>
+      </div>
+    </div>
+
     <button class="create-task-btn" @click="modalOpen = true">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
            stroke="currentColor" stroke-width="2.5">
@@ -249,6 +270,11 @@ function filterTasks(q) {
   });
 }
 
+// ── Auto-follow flag ──────────────────────────────────────────────
+// When a new task is created, should the Main area auto-switch to it?
+// Set to false when the user manually clicks a task.
+let autoFollowNewTask = true;
+
 // Highlight running task, populate header meta when a task is clicked.
 document.body.addEventListener('htmx:afterSwap', function(evt) {
   if (evt.target.id !== 'task-list') return;
@@ -285,18 +311,59 @@ document.body.addEventListener('htmx:afterSwap', function(evt) {
     pill.textContent = status;
     document.getElementById('task-phase-meta').innerHTML =
       'phase <b style="color: var(--text);">' + phase + '</b>';
+
+    // Auto-load the latest task's phase view on initial page load
+    // only if the user hasn't manually selected a task yet.
+    const phaseContent = document.getElementById('phase-content');
+    if (autoFollowNewTask && phaseContent && !phaseContent.querySelector('[data-event-seq]')) {
+      htmx.ajax('GET', '/tasks/' + id, {
+        target: '#phase-content',
+        swap: 'innerHTML'
+      });
+    }
   }
 });
 
 // Auto-load the phase view when a new task is created. The server
 // fires `load-phase-view` via HX-Trigger with the task_id in detail.
 document.body.addEventListener('load-phase-view', function(evt) {
+  if (!autoFollowNewTask) return;
   const taskId = evt.detail && (evt.detail.value || evt.detail);
   if (!taskId) return;
   htmx.ajax('GET', `/tasks/${taskId}`, {
     target: '#phase-content',
     swap: 'innerHTML'
   });
+});
+
+// ── Highlight active task card ────────────────────────────────────
+// Extract taskId from the URL being loaded into #phase-content.
+document.addEventListener('htmx:beforeSwap', function(evt) {
+  if (evt.detail.target.id !== 'phase-content') return;
+  const m = evt.detail.requestConfig.path.match(/^\/tasks\/([^/?]+)/);
+  if (!m) return;
+  const taskId = m[1];
+  document.querySelectorAll('.task-item').forEach(function(c) {
+    c.classList.toggle('active', c.dataset.taskId === taskId);
+  });
+});
+// Also highlight when a new task is created.
+document.body.addEventListener('load-phase-view', function(evt) {
+  const taskId = evt.detail && (evt.detail.value || evt.detail);
+  if (!taskId) return;
+  document.querySelectorAll('.task-item').forEach(function(c) {
+    c.classList.toggle('active', c.dataset.taskId === taskId);
+  });
+});
+
+// Disable auto-follow when the user manually clicks a task.
+document.addEventListener('htmx:beforeSwap', function(evt) {
+  const elt = evt.detail.elt;
+  // Only disable on user-clicked task items (hx-get on .task-item or its child)
+  if (elt && elt.closest && elt.closest('[data-task-id]') &&
+      !elt.closest('#task-list')?.dataset?.batchLoading) {
+    autoFollowNewTask = false;
+  }
 });
 </script>
 {% endblock %}

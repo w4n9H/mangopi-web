@@ -27,7 +27,11 @@ def implementer_phase(phase: str, goal: str, round_n: int, max_rounds: int):
         emit({"type": "tool", "name": "read",
               "args_preview": f"src/{goal.replace(' ', '_')}.py",
               "round": round_n})
-        time.sleep(0.8)
+        time.sleep(0.5)
+        emit({"type": "thinking", "content": f"Analysing {goal}: reviewing imports and dependencies…"})
+        time.sleep(0.3)
+        emit({"type": "output", "content": "login.py imports: session, crypto, db\n→ session.py handles token refresh\n→ crypto.py has AES-256 helper"})
+        time.sleep(0.3)
         emit({"type": "tool_result", "name": "read", "ok": True,
               "snippet": f"# {goal} — existing code with known issue",
               "round": round_n})

@@ -38,7 +38,11 @@
   <div class="phase-header-card-top">
     <span id="phase-status-tag" class="phase-tag {{ task.status }}">{{ task.status }}</span>
     <span style="color: var(--text-muted); font-size: 11px;">
-      {{ events|length }} events recorded
+      {% if events|length == 0 and task.status == 'running' %}
+      <span class="streaming"><span class="streaming-dot"></span> Waiting for CLI output…</span>
+      {% else %}
+      {{ events|length }} events
+      {% endif %}
     </span>
   </div>
   <div class="phase-goal-label">Goal</div>
@@ -96,6 +100,19 @@
         {% if p.snippet is defined and p.snippet %}
           <div class="tool-content">{{ p.snippet }}</div>
         {% endif %}
+      </div>
+
+    {# ── thinking (agent reasoning) ── #}
+    {% elif ev.type == 'thinking' %}
+      <div class="thinking-block" data-event-seq="{{ ev.seq }}">
+        <div class="thinking-label">Thinking</div>
+        <div class="thinking-text">{{ p.content|default('') }}</div>
+      </div>
+
+    {# ── output (tool/agent stdout) ── #}
+    {% elif ev.type == 'output' %}
+      <div class="output-block" data-event-seq="{{ ev.seq }}">
+        <div class="output-content">{{ p.content|default('') }}</div>
       </div>
 
     {# ── verdict ── #}
