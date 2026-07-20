@@ -1,9 +1,23 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="layout" style="grid-template-columns: 1fr;">
-  <main class="main">
+<div class="app-shell">
 
-    <div class="task-header">
+  <!-- ===== Minimal top bar ===== -->
+  <div class="app-top">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      </svg>
+      mangopi-web
+    </div>
+    <div class="top-actions">
+      <button class="top-btn" onclick="window.location='/'">&#8592; Back</button>
+    </div>
+  </div>
+
+  <div style="padding: 20px 0;">
+
+    <div class="task-header" style="border-bottom: 1px solid var(--border); margin-bottom: 16px;">
       <div class="task-header-top">
         <div>
           <div class="task-header-title">{{ task.name }}</div>
@@ -17,13 +31,15 @@
         </div>
         <div class="task-header-actions">
           <button class="icon-btn" title="back to tasks"
-                  onclick="window.location='/'">←</button>
+                  onclick="window.location='/'">&#8592;</button>
         </div>
       </div>
-      {% include "partials/phase_pipeline.html" %}
+      <div class="phase-timeline" data-current-phase="{{ task.current_phase or '' }}">
+        {% include "partials/phase_pipeline.html" %}
+      </div>
     </div>
 
-    <div class="phase-content scrollbar">
+    <div class="phase-content scrollbar" style="max-height: calc(100vh - 280px); overflow-y: auto;">
 
       <div class="phase-header-card">
         <div class="phase-header-card-top">
@@ -36,75 +52,43 @@
         <div class="phase-goal">{{ task.goal }}</div>
       </div>
 
-      {% set ns = namespace(in_run=false) %}
+      {% set _stage_map = {"research":"Researcher", "plan":"Implementer", "develop":"Implementer",
+                            "review":"Verifier", "test":"Verifier",
+                            "push":"Push"} %}
+      {% set ns = namespace(current_stage='') %}
       {% for ev in events %}
         {% set p = ev.payload|from_json %}
 
         {% if ev.type == 'iter' %}
-          {% if ns.in_run %}</div></div>{% endif %}
-          {% set ns.in_run = true %}
-          {% set agent = p.agent|default('agent') %}
-          {% set avatar_class = 'verifier' if agent == 'verifier' else ('updater' if agent == 'updater' else '') %}
-          {% set initial = 'I' if agent == 'implementer' else ('V' if agent == 'verifier' else 'U') %}
-          <div class="agent-run">
-            <div class="agent-run-header">
-              <div class="agent-avatar {{ avatar_class }}">{{ initial }}</div>
-              <span class="agent-name">{{ agent|capitalize }}</span>
-              <span class="agent-run-meta">
-                iter {{ p.n|default('?') }} · phase {{ p.phase|default('?') }}
+          {% set _stage = 'Updater' if p.agent == 'updater' else _stage_map.get(p.phase, '') %}
+          {% if _stage and _stage != ns.current_stage %}
+            {% set ns.current_stage = _stage %}
+            <div class="stage-header" data-event-seq="{{ ev.seq }}">
+              <div class="stage-header-line"></div>
+              <span class="stage-header-label">{{ _stage }}</span>
+              <div class="stage-header-line"></div>
+              <span class="stage-header-detail">
+                {% if _stage == 'Researcher' %}web search + synthesis
+                {% elif _stage == 'Implementer' %}plan + develop
+                {% elif _stage == 'Verifier' %}review + test
+                {% elif _stage == 'Push' %}finalize
+                {% elif _stage == 'Updater' %}correction
+                {% endif %}
               </span>
-            </div>
-            <div class="agent-run-body">
-              <div class="thinking-block">
-                <div class="thinking-label">Thinking</div>
-                <div class="thinking-text">— agent reasoning will appear here —</div>
-              </div>
-
-        {% elif ev.type in ('start', 'complete', 'exit') %}
-          {% if ns.in_run %}</div></div>{% set ns.in_run = false %}{% endif %}
-          {% if ev.type == 'start' %}
-            <div class="phase-header-card" style="margin-top: 0;">
-              <div class="phase-goal-label">Started</div>
-              <div class="phase-goal" style="font-size: 12px; color: var(--text-muted);">
-                {{ p.goal }}
-              </div>
-            </div>
-          {% elif ev.type == 'complete' %}
-            <div class="verdict-block">
-              <strong>COMPLETE:</strong> {{ p.result|default('done') }}
-            </div>
-          {% elif ev.type == 'exit' %}
-            <div style="font-size: 10px; color: var(--text-muted);
-                        font-family: 'JetBrains Mono', monospace;
-                        text-align: center; margin: 8px 0;
-                        letter-spacing: 0.05em;">
-              ⏹ exit code {{ p.code|default('?') }}
             </div>
           {% endif %}
 
         {% elif ev.type == 'tool' %}
-          {% if not ns.in_run %}
-            <div class="agent-run"><div class="agent-run-body">
-            {% set ns.in_run = true %}
-          {% endif %}
-          <div class="tool-card">
+          <div class="tool-card" data-event-seq="{{ ev.seq }}">
             <div class="tool-header">
               <span class="tool-name">{{ p.name|default('?') }}</span>
               <span class="tool-args">{{ p.args_preview|default('') }}</span>
-              <span class="tool-status pending">call</span>
-            </div>
-            <div class="diff-line empty">
-              <span class="diff-line-num">—</span>
-              <span class="diff-line-content">— waiting for result —</span>
+              <span class="tool-status call">call</span>
             </div>
           </div>
 
         {% elif ev.type == 'tool_result' %}
-          {% if not ns.in_run %}
-            <div class="agent-run"><div class="agent-run-body">
-            {% set ns.in_run = true %}
-          {% endif %}
-          <div class="tool-card">
+          <div class="tool-card result" data-event-seq="{{ ev.seq }}">
             <div class="tool-header">
               <span class="tool-name">{{ p.name|default('?') }}</span>
               <span class="tool-status {{ 'success' if p.ok else 'fail' }}">
@@ -113,63 +97,48 @@
             </div>
             {% if p.snippet is defined and p.snippet %}
               <div class="tool-content">{{ p.snippet }}</div>
-            {% else %}
-              <div class="diff-line empty">
-                <span class="diff-line-num">—</span>
-                <span class="diff-line-content">— no snippet —</span>
-              </div>
             {% endif %}
           </div>
 
+        {% elif ev.type == 'thinking' %}
+          <div class="thinking-block" data-event-seq="{{ ev.seq }}">
+            <div class="thinking-label">Thinking</div>
+            <div class="thinking-text">{{ p.content|default('') }}</div>
+          </div>
+
+        {% elif ev.type == 'output' %}
+          <div class="output-block" data-event-seq="{{ ev.seq }}">
+            <div class="output-content">{{ p.content|default('') }}</div>
+          </div>
+
         {% elif ev.type == 'verdict' %}
-          {% if not ns.in_run %}
-            <div class="agent-run"><div class="agent-run-body">
-            {% set ns.in_run = true %}
-          {% endif %}
           {% set v = p.verdict|default('') %}
-          <div class="verdict-block {{ 'fail' if 'FAIL' in v else '' }}">
-            <strong>VERDICT:</strong> {{ v }}
+          <div class="verdict-slim {{ 'fail' if 'FAIL' in v else 'pass' }}"
+               data-event-seq="{{ ev.seq }}">
+            {{ '✗' if 'FAIL' in v else '✔' }} {{ v }}
+          </div>
+
+        {% elif ev.type == 'complete' %}
+          <div class="verdict-slim pass" data-event-seq="{{ ev.seq }}">✔ Complete</div>
+        {% elif ev.type == 'exit' %}
+          <div class="exit-code" data-event-seq="{{ ev.seq }}">⏹ exit {{ p.code|default('?') }}</div>
+
+        {% elif ev.type == 'error' %}
+          <div class="verdict-slim fail" data-event-seq="{{ ev.seq }}">
+            ✗ {{ p.message|default('error') }}
           </div>
 
         {% elif ev.type == 'usage' %}
-          {% if not ns.in_run %}
-            <div class="agent-run"><div class="agent-run-body">
-            {% set ns.in_run = true %}
-          {% endif %}
-          <div style="font-size: 11px; color: var(--text-muted);
-                      font-family: 'JetBrains Mono', monospace;
-                      margin: 4px 0;">
-            ⟳ tokens: {{ p.total|default(0) }}
-            (prompt {{ p.prompt_tokens|default(0) }} +
-             completion {{ p.completion_tokens|default(0) }})
-          </div>
-
-        {% elif ev.type == 'phase' %}
-          {% if not ns.in_run %}
-            <div class="agent-run"><div class="agent-run-body">
-            {% set ns.in_run = true %}
-          {% endif %}
-          <div style="font-size: 11px; color: var(--primary);
-                      font-family: 'JetBrains Mono', monospace;
-                      text-align: center; margin: 6px 0;
-                      letter-spacing: 0.05em;">
-            ⇣ {{ p.from }} → {{ p.to }}
-          </div>
-
-        {% elif ev.type == 'error' %}
-          {% if not ns.in_run %}
-            <div class="agent-run"><div class="agent-run-body">
-            {% set ns.in_run = true %}
-          {% endif %}
-          <div class="verdict-block fail">
-            <strong>ERROR:</strong> {{ p.message|default('?') }}
+          <div class="usage-line" data-event-seq="{{ ev.seq }}">
+            <span class="usage-label">Tokens</span>
+            <span class="usage-value">{{ p.total|default(0) }}</span>
+            <span class="usage-detail">prompt {{ p.prompt_tokens|default(0) }} + completion {{ p.completion_tokens|default(0) }}</span>
           </div>
 
         {% endif %}
       {% endfor %}
-      {% if ns.in_run %}</div></div>{% endif %}
 
     </div>
-  </main>
+  </div>
 </div>
 {% endblock %}

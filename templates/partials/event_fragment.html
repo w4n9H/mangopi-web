@@ -1,0 +1,95 @@
+{# Renders a single event as an HTML fragment for SSE direct push.
+   Also includes pipeline OOB updates when phase changes.
+   Used by: sse_stream() in mangopi_web.py #}
+
+{% set p = event.payload|from_json %}
+
+{# ── iter ── #}
+{% if event.type == 'iter' %}
+  {% set _stage_map = {"research":"Researcher", "plan":"Implementer", "develop":"Implementer",
+                        "review":"Verifier", "test":"Verifier",
+                        "push":"Push"} %}
+  {% set _stage = 'Updater' if p.agent == 'updater' else _stage_map.get(p.phase, '') %}
+  {% if _stage and _stage != last_stage %}
+<div class="stage-header" data-event-stage="{{ _stage }}" data-event-seq="{{ event.seq }}">
+  <div class="stage-header-line"></div>
+  <span class="stage-header-label">{{ _stage }}</span>
+  <div class="stage-header-line"></div>
+  <span class="stage-header-detail">
+    {% if _stage == 'Researcher' %}web search + synthesis
+    {% elif _stage == 'Implementer' %}plan + develop
+    {% elif _stage == 'Verifier' %}review + test
+    {% elif _stage == 'Push' %}finalize
+    {% elif _stage == 'Updater' %}correction
+    {% endif %}
+  </span>
+</div>
+  {% endif %}
+
+{# ── tool ── #}
+{% elif event.type == 'tool' %}
+<div class="tool-card" data-event-seq="{{ event.seq }}">
+  <div class="tool-header">
+    <span class="tool-name">{{ p.name|default('?') }}</span>
+    <span class="tool-args">{{ p.args_preview|default('') }}</span>
+    <span class="tool-status call">call</span>
+  </div>
+</div>
+
+{# ── tool_result ── #}
+{% elif event.type == 'tool_result' %}
+<div class="tool-card result" data-event-seq="{{ event.seq }}">
+  <div class="tool-header">
+    <span class="tool-name">{{ p.name|default('?') }}</span>
+    <span class="tool-status {{ 'success' if p.ok else 'fail' }}">
+      {{ 'ok' if p.ok else 'fail' }}
+    </span>
+  </div>
+  {% if p.snippet is defined and p.snippet %}
+    <div class="tool-content">{{ p.snippet }}</div>
+  {% endif %}
+</div>
+
+{# ── thinking ── #}
+{% elif event.type == 'thinking' %}
+<div class="thinking-block" data-event-seq="{{ event.seq }}">
+  <div class="thinking-label">Thinking</div>
+  <div class="thinking-text">{{ p.content|default('') }}</div>
+</div>
+
+{# ── output ── #}
+{% elif event.type == 'output' %}
+<div class="output-block" data-event-seq="{{ event.seq }}">
+  <div class="output-content">{{ p.content|default('') }}</div>
+</div>
+
+{# ── verdict ── #}
+{% elif event.type == 'verdict' %}
+  {% set v = p.verdict|default('') %}
+<div class="verdict-slim {{ 'fail' if 'FAIL' in v else 'pass' }}"
+     data-event-seq="{{ event.seq }}">
+  {{ '✗' if 'FAIL' in v else '✔' }} {{ v }}
+</div>
+
+{# ── usage ── #}
+{% elif event.type == 'usage' %}
+<div class="usage-line" data-event-seq="{{ event.seq }}">
+  <span class="usage-label">Tokens</span>
+  <span class="usage-value">{{ p.total|default(0) }}</span>
+  <span class="usage-detail">prompt {{ p.prompt_tokens|default(0) }} + completion {{ p.completion_tokens|default(0) }}</span>
+</div>
+
+{# ── complete / exit ── #}
+{% elif event.type == 'complete' %}
+<div class="verdict-slim pass" data-event-seq="{{ event.seq }}">✔ Complete</div>
+{% elif event.type == 'exit' %}
+<div class="exit-code" data-event-seq="{{ event.seq }}">⏹ exit {{ p.code|default('?') }}</div>
+
+{# ── error ── #}
+{% elif event.type == 'error' %}
+<div class="verdict-slim fail" data-event-seq="{{ event.seq }}">
+  ✗ {{ p.message|default('error') }}
+</div>
+
+{% endif %}
+{# start events silently skipped #}

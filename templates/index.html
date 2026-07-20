@@ -1,83 +1,139 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="layout" x-data="{ modalOpen: false }"
-     @close-modal.window="modalOpen = false;
-                          $nextTick(() => {
-                            document.querySelector('form[hx-post=\"/tasks\"]')?.reset();
-                          })">
+<div class="app-shell">
 
-  <!-- ===== Left Sidebar: Tasks ===== -->
-  <aside class="sidebar-left">
-    <div class="sidebar-header">
-      <div class="sidebar-title">Tasks</div>
-      <div style="font-size: 11px; color: var(--text-muted);" id="task-count">0</div>
-    </div>
-
-    <!-- Mini dashboard: system status -->
-    <div class="sidebar-dashboard"
-         x-data="{ mode: '—', active: 0, maxC: 3, health: '—' }"
-         x-init="fetch('/health').then(r => r.json()).then(d => {
-           mode = d.mode; active = d.active; maxC = d.max_concurrent;
-           health = d.web === 'ok' ? '✓ ok' : '✗ fail';
-         });">
-      <div class="sd-card">
-        <span class="sd-card-value" x-text="mode"></span>
-        <span class="sd-card-label">Mode</span>
-      </div>
-      <div class="sd-card accent-active">
-        <span class="sd-card-value" x-text="active + '/' + maxC"></span>
-        <span class="sd-card-label">Active</span>
-      </div>
-      <div class="sd-card accent-health">
-        <span class="sd-card-value" x-text="health"></span>
-        <span class="sd-card-label">Health</span>
-      </div>
-    </div>
-
-    <button class="create-task-btn" @click="modalOpen = true">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-           stroke="currentColor" stroke-width="2.5">
-        <line x1="12" y1="5" x2="12" y2="19"/>
-        <line x1="5" y1="12" x2="19" y2="12"/>
+  <!-- ===== Minimal top bar ===== -->
+  <div class="app-top">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
       </svg>
-      Create Task
-    </button>
-
-    <div class="sidebar-search">
-      <input type="search" class="search-input"
-             placeholder="Filter tasks…"
-             oninput="filterTasks(this.value)">
+      mangopi-web
     </div>
+    <div class="top-actions">
+      <button class="top-btn" @click="theme = theme === 'light' ? 'dark' : 'light'"
+              title="Toggle theme"
+              x-text="theme === 'light' ? '☀' : '☽'"></button>
+      <button class="top-btn" id="settings-btn" title="settings (v0.2)">&#9881;</button>
+    </div>
+  </div>
 
-    <!-- htmx fetches task list on page load -->
-    <div id="task-list" class="task-list scrollbar"
-         hx-get="/tasks" hx-trigger="load" hx-swap="innerHTML">
-      <div style="padding: 20px 12px; text-align: center;
-                  color: var(--text-muted); font-size: 12px;">
-        Loading…
+  <!-- ===== Three-column layout ===== -->
+  <div class="layout">
+
+    <!-- ===== Left Sidebar ===== -->
+    <aside class="sidebar-left">
+
+      <!-- Stats area -->
+      <div class="sidebar-stats"
+           x-data="{ total: '—', running: 0, mode: '—' }"
+           x-init="fetch('/api/heatmap').then(r => r.json()).then(d => {
+             let total = 0, active = 0;
+             d.forEach(function(day) { total += day.count; });
+             fetch('/health').then(r => r.json()).then(h => {
+               running = h.active;
+               mode = h.mode;
+               $el.querySelector('#stat-total').textContent = total;
+               $el.querySelector('#stat-running').textContent = running;
+               $el.querySelector('#stat-mode').textContent = mode;
+             });
+           });">
+        <div class="stat-item">
+          <span class="stat-value" id="stat-total">—</span>
+          <span class="stat-label">Tasks</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" id="stat-running">—</span>
+          <span class="stat-label">Active</span>
+        </div>
+        <div class="stat-item">
+          <span class="stat-value" id="stat-mode">—</span>
+          <span class="stat-label">Mode</span>
+        </div>
       </div>
-    </div>
-  </aside>
 
-  <!-- ===== Main: Phase View ===== -->
-  <main class="main">
-    <!-- Task header (placeholder when no task selected) -->
-    <div class="task-header" id="task-header-empty">
-      <div class="task-header-top">
-        <div>
-          <div class="task-header-title" id="task-title">No task selected</div>
-          <div class="task-header-meta">
-            <span id="task-id-meta">—</span>
-            <span>·</span>
-            <span class="task-status-pill" id="task-status-meta">—</span>
-            <span>·</span>
-            <span id="task-phase-meta">—</span>
+      <!-- Heatmap -->
+      <div class="sidebar-heatmap"
+           x-data="{ cells: [] }"
+           x-init="fetch('/api/heatmap').then(r => r.json()).then(d => {
+             cells = d;
+             $nextTick(() => renderHeatmap(d));
+           });">
+        <div class="heatmap-grid" id="heatmap-grid"></div>
+      </div>
+
+      <!-- Task list header -->
+      <div class="sidebar-tasks-header">
+        <div class="sidebar-section-title">Tasks</div>
+        <span style="font-size: 10px; color: var(--text-dim);" id="task-count">0</span>
+      </div>
+
+      <!-- Search -->
+      <div class="search-sizer">
+        <input type="search" class="search-input"
+               placeholder="Filter tasks..."
+               oninput="filterTasks(this.value)">
+      </div>
+
+      <!-- Task list -->
+      <div id="task-list" class="task-list scrollbar"
+           hx-get="/tasks" hx-trigger="load" hx-swap="innerHTML">
+        <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 12px;">
+          Loading...
+        </div>
+      </div>
+    </aside>
+
+    <!-- ===== Main Area ===== -->
+    <main class="main">
+
+      <!-- Input bar — fused container like Mango Pro -->
+      <div class="task-input-bar">
+        <form hx-post="/tasks"
+              hx-target="#task-list" hx-swap="afterbegin"
+              x-data="{ pushOn: false }"
+              @submit="if (pushOn) { const hi = document.createElement('input'); hi.type='hidden'; hi.name='push'; hi.value='on'; $el.appendChild(hi); }">
+          <div class="task-input-box">
+            <textarea name="goal" class="task-textarea"
+                      placeholder="describe what the agent should do…"
+                      rows="3" required></textarea>
+            <div class="task-input-toolbar">
+              <button type="button"
+                      class="push-chip"
+                      :class="{ active: pushOn }"
+                      @click="pushOn = !pushOn">
+                --push
+              </button>
+              <select name="mode" class="mode-select">
+                <option value="">default</option>
+                <option value="fast">--fast</option>
+                <option value="wish">--wish</option>
+              </select>
+              <button type="submit" class="task-run-btn">Run</button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      <!-- Task header (populated by phase view OOB swap) -->
+      <div class="task-header" id="task-header-empty">
+        <div class="task-header-top">
+          <div>
+            <div class="task-header-title" id="task-title">No task selected</div>
+            <div class="task-header-meta">
+              <span id="task-id-meta">—</span>
+              <span>·</span>
+              <span class="task-status-pill" id="task-status-meta">—</span>
+              <span>·</span>
+              <span id="task-phase-meta">—</span>
+            </div>
+          </div>
+          <div class="task-header-actions">
+            <button class="icon-btn" title="settings">⚙</button>
           </div>
         </div>
-        <div class="task-header-actions">
-          <button class="icon-btn" title="settings">⚙</button>
-        </div>
       </div>
+
       <!-- Phase timeline placeholder -->
       <div class="phase-timeline" id="phase-timeline-placeholder">
         {% for p in phases %}
@@ -93,277 +149,490 @@
         {% endif %}
         {% endfor %}
       </div>
-    </div>
 
-    <!-- Phase content area: empty state or live events -->
-    <div class="phase-content scrollbar" id="phase-content">
-      <div class="empty-state" id="empty-state">
-        <div class="empty-state-icon">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="1.5">
-            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-            <path d="M2 17l10 5 10-5"/>
-            <path d="M2 12l10 5 10-5"/>
-          </svg>
-        </div>
-        <div class="empty-state-title">No task selected</div>
-        <div class="empty-state-text">
-          Click <b style="color: var(--text);">+ Create Task</b> in the sidebar
-          to start a 5-phase loop.
-        </div>
-      </div>
-    </div>
-</main>
-
-  <!-- ===== Right Sidebar: Working Dir + Git ===== -->
-  <aside class="sidebar-right scrollbar"
-         x-data="{ selectedCommit: null, defaultFiles: [], commits: [] }">
-    <!-- Working Dir section -->
-    <div class="right-section">
-      <div class="right-section-header">
-        <div class="right-section-title">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          </svg>
-          Working Dir
-        </div>
-      </div>
-      <div class="wd-path" id="wd-path-wrap" title="Current directory"><span id="wd-path-text">/home/user/projects/mangopi-test</span></div>
-      <div class="wd-branch">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2.5">
-          <line x1="6" y1="3" x2="6" y2="15"/>
-          <circle cx="18" cy="6" r="3"/>
-          <circle cx="6" cy="18" r="3"/>
-          <path d="M18 9a9 9 0 0 1-9 9"/>
-        </svg>
-        main
-      </div>
-    </div>
-
-    <!-- Changed files section -->
-    <div class="right-section">
-      <div class="right-section-header">
-        <div class="right-section-title">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-          </svg>
-          Changed files
-          <span x-text="selectedCommit ? selectedCommit.files.length + ' files' : '3 files'"
-                style="margin-left: 4px; font-weight: 400; color: var(--text-muted);"></span>
-        </div>
-      </div>
-      <template x-for="f in (selectedCommit?.files || defaultFiles)" :key="f.path">
-        <div class="wd-file">
-          <span class="wd-file-status" :class="f.type" x-text="f.type"></span>
-          <span class="wd-file-path" x-text="f.path"></span>
-          <span class="wd-file-stats"><span class="add" x-text="'+' + f.add"></span> <span class="del" x-text="'-' + f.del"></span></span>
-        </div>
-      </template>
-
-      <div style="display:none"
-           x-init="fetch('/api/workspace').then(r => r.json()).then(w => { document.getElementById('wd-path-text').textContent = w.path; }); fetch('/api/git/commits').then(r => r.json()).then(data => { commits = data; defaultFiles = data[0]?.files || []; }); selectedCommit = null"></div>
-    </div>
-
-    <!-- Recent Commits section -->
-    <div class="right-section">
-      <div class="right-section-header">
-        <div class="right-section-title">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="4"/>
-            <line x1="1.05" y1="12" x2="7" y2="12"/>
-            <line x1="17.01" y1="12" x2="22.96" y2="12"/>
-          </svg>
-          Recent Commits
-        </div>
-      </div>
-      <template x-for="c in (commits || [])" :key="c.hash">
-        <div class="commit-item"
-             :class="{ active: selectedCommit?.hash === c.hash }"
-             @click="selectedCommit = c">
-          <div class="commit-head">
-            <span class="commit-hash" x-text="'#' + c.hash.slice(0,7)"></span>
-            <span class="commit-time" x-text="c.time"></span>
+      <!-- Phase content area -->
+      <div class="phase-content scrollbar" id="phase-content">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-state-icon">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.5">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
+            </svg>
           </div>
-          <div class="commit-msg" x-text="c.msg"></div>
+          <div class="empty-state-title">No task selected</div>
+          <div class="empty-state-text">
+            Describe what the agent should do above and press <b style="color: var(--primary);">Run</b>.
+          </div>
         </div>
-      </template>
-      <div x-show="!commits?.length" class="commit-item empty">
-        <div class="commit-head">
-          <span class="commit-hash">————</span>
-          <span class="commit-time">—</span>
-        </div>
-        <div class="commit-msg">— no commits yet —</div>
       </div>
-    </div>
-  </aside>
+    </main>
 
-  <footer class="app-footer">2026 MANGOPI CLI · Apache 2.0</footer>
+    <!-- ===== Right Sidebar: Working Dir + Git ===== -->
+    <aside class="sidebar-right scrollbar"
+           x-data="{ selectedCommit: null, defaultFiles: [], commits: [] }">
 
-<!-- Hidden sink for /advance OOB responses. The SSE-trigger on each
-     task card posts there so HTMX has somewhere to swap the response;
-     the OOB elements in the response update the card in place. -->
-<div id="advance-noop" style="display:none"></div>
+      <!-- Working Dir -->
+      <div class="right-section">
+        <div class="right-section-header">
+          <div class="right-section-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            Working Dir
+          </div>
+        </div>
+        <div class="wd-path" id="wd-path-wrap" title="Current directory">
+          <span id="wd-path-text">/home/user/projects/mangopi-test</span>
+        </div>
+        <div class="wd-branch">
+          <svg width="9" height="9" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.5">
+            <line x1="6" y1="3" x2="6" y2="15"/>
+            <circle cx="18" cy="6" r="3"/>
+            <circle cx="6" cy="18" r="3"/>
+            <path d="M18 9a9 9 0 0 1-9 9"/>
+          </svg>
+          main
+        </div>
+      </div>
 
-<!-- ===== Create Task Modal ===== -->
-<div x-show="modalOpen" x-cloak class="modal-backdrop"
-     @keydown.escape.window="modalOpen = false">
-  <div class="modal" @click.outside="modalOpen = false">
-    <div class="modal-header">
-      <div class="modal-title">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2"
-             style="color: var(--primary);">
-          <line x1="12" y1="5" x2="12" y2="19"/>
-          <line x1="5" y1="12" x2="19" y2="12"/>
-        </svg>
-        Create Task
-      </div>
-      <button type="button" class="modal-close" @click="modalOpen = false">×</button>
-    </div>
-    <form hx-post="/tasks"
-          hx-target="#task-list" hx-swap="afterbegin">
-      <div class="modal-body">
-        <div class="form-group">
-          <label class="form-label">Name</label>
-          <input x-ref="nameEl" type="text" name="name" class="form-input mono"
-                 placeholder="fix-auth-bug" required autofocus>
+      <!-- Changed Files -->
+      <div class="right-section">
+        <div class="right-section-header">
+          <div class="right-section-title">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+            </svg>
+            Changed files
+            <span x-text="selectedCommit ? selectedCommit.files.length + ' files' : '3 files'"
+                  style="margin-left: 4px; font-weight: 400; color: var(--text-muted);"></span>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">
-            Goal
-            <span class="hint">— what should the loop_engine accomplish?</span>
-          </label>
-          <textarea x-ref="goalEl" name="goal" class="form-textarea"
-                    placeholder="Find the race condition in src/auth/login.py and fix it. Add a test that reproduces the issue."
-                    required></textarea>
+        <template x-for="f in (selectedCommit?.files || defaultFiles)" :key="f.path">
+          <div class="wd-file">
+            <span class="wd-file-status" :class="f.type" x-text="f.type"></span>
+            <span class="wd-file-path" x-text="f.path"></span>
+            <span class="wd-file-stats"><span class="add" x-text="'+' + f.add"></span> <span class="del" x-text="'-' + f.del"></span></span>
+          </div>
+        </template>
+        <div style="display:none"
+             x-init="fetch('/api/workspace').then(r => r.json()).then(w => { document.getElementById('wd-path-text').textContent = w.path; }); fetch('/api/git/commits').then(r => r.json()).then(data => { commits = data; defaultFiles = data[0]?.files || []; }); selectedCommit = null"></div>
+      </div>
+
+      <!-- Recent Commits -->
+      <div class="right-section">
+        <div class="right-section-header">
+          <div class="right-section-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="4"/>
+              <line x1="1.05" y1="12" x2="7" y2="12"/>
+              <line x1="17.01" y1="12" x2="22.96" y2="12"/>
+            </svg>
+            Recent Commits
+          </div>
         </div>
-        <div class="form-checkbox">
-          <input type="checkbox" id="auto-advance" name="auto_advance" checked>
-          <label for="auto-advance">Auto-run all 5 phases (Plan → Develop → Review → Test → Push)</label>
+        <template x-for="c in (commits || [])" :key="c.hash">
+          <div class="commit-item"
+               :class="{ active: selectedCommit?.hash === c.hash }"
+               @click="selectedCommit = c">
+            <div class="commit-head">
+              <span class="commit-hash" x-text="'#' + c.hash.slice(0,7)"></span>
+              <span class="commit-time" x-text="c.time"></span>
+            </div>
+            <div class="commit-msg" x-text="c.msg"></div>
+          </div>
+        </template>
+        <div x-show="!commits?.length" class="commit-item empty">
+          <div class="commit-head">
+            <span class="commit-hash">————</span>
+            <span class="commit-time">—</span>
+          </div>
+          <div class="commit-msg">— no commits yet —</div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary"
-                @click="modalOpen = false">Cancel</button>
-        <button type="submit" class="btn btn-primary">Create &amp; Run</button>
-      </div>
-    </form>
+    </aside>
+
+    <footer class="app-footer">mangopi CLI · Apache 2.0</footer>
   </div>
 </div>
+
+<!-- Hidden sink for /advance OOB responses -->
+<div id="advance-noop" style="display:none"></div>
+
+<!-- Global delete dropdown (body level, immune to overflow clipping) -->
+<div id="global-task-dropdown" class="task-menu-dropdown" style="display:none;">
+  <div id="global-dd-main">
+    <button class="task-menu-item" id="global-dd-delete-btn">Delete</button>
+  </div>
+  <div id="global-dd-confirm" style="display:none;">
+    <div style="padding: 5px 8px;">
+      <div style="font-size: 11px; color: var(--text); margin-bottom: 6px; white-space: nowrap;">
+        Delete this task?
+      </div>
+      <div style="display: flex; gap: 6px;">
+        <button class="task-menu-item" style="font-weight: 600;" id="global-dd-yes">Yes</button>
+        <button class="task-menu-item" style="color: var(--text-muted);" id="global-dd-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
-// Task search filter — client-side by task name
+// ── Global delete dropdown (body-level, immune to overflow clip) ─
+(function() {
+  var dd = document.getElementById('global-task-dropdown');
+  var ddMain = document.getElementById('global-dd-main');
+  var ddConfirm = document.getElementById('global-dd-confirm');
+  var currentTaskId = null;
+
+  function showDropdown(btn) {
+    var row = btn.closest('.task-row');
+    if (!row) return;
+    currentTaskId = row.dataset.taskId;
+
+    // Show + measure dropdown
+    dd.style.display = 'block';
+    ddMain.style.display = '';
+    ddConfirm.style.display = 'none';
+
+    var btnRect = btn.getBoundingClientRect();
+    var ddW = dd.offsetWidth;
+    var left = btnRect.right - ddW;
+    if (left < 8) left = 8; // don't go off-screen left
+    dd.style.left = left + 'px';
+    dd.style.top = (btnRect.bottom + 3) + 'px';
+  }
+
+  function hideDropdown() {
+    dd.style.display = 'none';
+    currentTaskId = null;
+  }
+
+  // Click on ··· button in task rows
+  document.addEventListener('click', function(e) {
+    var btn = e.target.closest('.task-menu-btn');
+    if (btn) {
+      e.stopPropagation();
+      e.preventDefault();
+      showDropdown(btn);
+      return;
+    }
+    // Click anywhere else closes
+    hideDropdown();
+  });
+
+  // Delete button → show confirm
+  document.getElementById('global-dd-delete-btn').addEventListener('click', function(e) {
+    e.stopPropagation();
+    ddMain.style.display = 'none';
+    ddConfirm.style.display = '';
+  });
+
+  // Cancel
+  document.getElementById('global-dd-cancel').addEventListener('click', function(e) {
+    e.stopPropagation();
+    hideDropdown();
+  });
+
+  // Yes — do the actual delete
+  document.getElementById('global-dd-yes').addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (currentTaskId) {
+      htmx.ajax('DELETE', '/tasks/' + currentTaskId, {
+        target: '#task-' + currentTaskId,
+        swap: 'outerHTML'
+      });
+    }
+    hideDropdown();
+  });
+})();
+
+// ── Heatmap renderer ────────────────────────────────────────────
+function renderHeatmap(data) {
+  const grid = document.getElementById('heatmap-grid');
+  if (!grid || !data.length) return;
+  grid.innerHTML = '';
+  const maxCount = Math.max(1, ...data.map(function(d) { return d.count; }));
+  data.forEach(function(d) {
+    const cell = document.createElement('div');
+    cell.className = 'heatmap-cell';
+    if (d.count > 0) {
+      if (d.count <= maxCount * 0.25) cell.classList.add('l1');
+      else if (d.count <= maxCount * 0.5) cell.classList.add('l2');
+      else if (d.count <= maxCount * 0.75) cell.classList.add('l3');
+      else cell.classList.add('l4');
+    }
+    cell.title = d.date + ': ' + d.count + ' task' + (d.count !== 1 ? 's' : '');
+    grid.appendChild(cell);
+  });
+}
+
+// ── Task filter ─────────────────────────────────────────────────
 function filterTasks(q) {
   q = q.toLowerCase();
-  const items = document.getElementById('task-list')?.children;
+  var items = document.getElementById('task-list')?.children;
   if (!items) return;
   Array.from(items).forEach(function(el) {
-    if (!el.classList || !el.classList.contains('task-item')) return;
-    const name = el.querySelector('.task-item-name')?.textContent?.toLowerCase() || '';
+    if (!el.classList || !el.classList.contains('task-row')) return;
+    var name = el.querySelector('.task-row-name')?.textContent?.toLowerCase() || '';
     el.style.display = name.includes(q) ? '' : 'none';
   });
 }
 
-// ── Auto-follow flag ──────────────────────────────────────────────
-// When a new task is created, should the Main area auto-switch to it?
-// Set to false when the user manually clicks a task.
-let autoFollowNewTask = true;
+// ── Auto-follow flag ────────────────────────────────────────────
+var autoFollowNewTask = true;
 
 // Highlight running task, populate header meta when a task is clicked.
 document.body.addEventListener('htmx:afterSwap', function(evt) {
   if (evt.target.id !== 'task-list') return;
 
-  // Close the create-task modal and reset the form.
-  // Using htmx:afterSwap is more reliable than Alpine's
-  // @htmx:afterRequest because it fires after the DOM has
-  // settled — $refs are guaranteed to be available.
-  const layout = document.querySelector('.layout');
-  if (layout && window.Alpine) {
-    Alpine.$data(layout).modalOpen = false;
-  }
-  const form = document.querySelector('form[hx-post="/tasks"]');
+  var form = document.querySelector('form[hx-post="/tasks"]');
   if (form) form.reset();
 
-  const tasks = evt.target.querySelectorAll('.task-item');
+  var tasks = evt.target.querySelectorAll('.task-row');
   document.getElementById('task-count').textContent = tasks.length;
 
-  const running = evt.target.querySelector('.task-item.running');
-  const last = tasks[0];   // most recent
+  // Refresh heatmap stats
+  var statTotal = document.getElementById('stat-total');
+  if (statTotal) statTotal.textContent = tasks.length;
 
+  var last = tasks[0];
   if (last) {
-    const id = last.dataset.taskId;
-    const name = last.querySelector('.task-item-name')?.textContent || '';
-    const phase = last.dataset.phase || 'queued';
-    const status = [...last.classList].find(c =>
-      ['queued','running','done','failed'].includes(c)) || 'queued';
+    var id = last.dataset.taskId;
+    var name = last.querySelector('.task-row-name')?.textContent || '';
+    var phase = last.dataset.phase || 'queued';
+    var status = Array.from(last.classList).find(function(c) {
+      return ['queued','running','done','failed'].indexOf(c) >= 0;
+    }) || 'queued';
 
     document.getElementById('task-title').textContent = name;
     document.getElementById('task-id-meta').innerHTML =
       '<code style="font-size: 11px;">' + id + '</code>';
-    const pill = document.getElementById('task-status-meta');
+    var pill = document.getElementById('task-status-meta');
     pill.className = 'task-status-pill ' + status;
     pill.textContent = status;
     document.getElementById('task-phase-meta').innerHTML =
       'phase <b style="color: var(--text);">' + phase + '</b>';
 
-    // Auto-load the latest task's phase view on initial page load
-    // only if the user hasn't manually selected a task yet.
-    const phaseContent = document.getElementById('phase-content');
-    if (autoFollowNewTask && phaseContent && !phaseContent.querySelector('[data-event-seq]')) {
-      htmx.ajax('GET', '/tasks/' + id, {
-        target: '#phase-content',
-        swap: 'innerHTML'
-      });
-    }
+    // Always load the new task's phase view (replace whatever was there)
+    autoFollowNewTask = true;
+    htmx.ajax('GET', '/tasks/' + id, {
+      target: '#phase-content',
+      swap: 'innerHTML'
+    });
   }
 });
 
-// Auto-load the phase view when a new task is created. The server
-// fires `load-phase-view` via HX-Trigger with the task_id in detail.
+// Auto-load the phase view when server triggers it (HX-Trigger header from create_task).
 document.body.addEventListener('load-phase-view', function(evt) {
-  if (!autoFollowNewTask) return;
-  const taskId = evt.detail && (evt.detail.value || evt.detail);
+  var taskId = evt.detail && (evt.detail.value || evt.detail);
   if (!taskId) return;
-  htmx.ajax('GET', `/tasks/${taskId}`, {
+
+  // Highlight the matching task row
+  document.querySelectorAll('.task-row').forEach(function(r) {
+    r.classList.toggle('active', r.dataset.taskId === taskId);
+  });
+
+  htmx.ajax('GET', '/tasks/' + taskId, {
     target: '#phase-content',
     swap: 'innerHTML'
   });
 });
 
-// ── Highlight active task card ────────────────────────────────────
-// Extract taskId from the URL being loaded into #phase-content.
+// ── Smart auto-scroll ➔ bottom ──────────────────────────────────────
+// Tracks whether the user is near the bottom of the event log.
+// Only auto-scrolls when the user hasn't scrolled up to read history.
+var _userNearBottom = true;
+var _scrollContainer = null;
+
+function _getScrollContainer() {
+  // Always look up fresh — the element may be replaced after task switch
+  return document.getElementById('phase-content');
+}
+
+function _isNearBottom(el, threshold) {
+  threshold = threshold || 80;
+  return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+}
+
+function _scrollToBottom(el) {
+  // Double rAF: first frame lets the browser layout the new content,
+  // second frame ensures scrollHeight is accurate before we read it.
+  requestAnimationFrame(function() {
+    requestAnimationFrame(function() {
+      el.scrollTop = el.scrollHeight;
+    });
+  });
+}
+
+function _initScrollTracking() {
+  var content = _getScrollContainer();
+  if (!content) return;
+  if (_scrollContainer === content) return; // already tracking this element
+
+  // Remove old listener if container was replaced
+  if (_scrollContainer) {
+    _scrollContainer.removeEventListener('scroll', _onScroll);
+  }
+
+  _scrollContainer = content;
+  _userNearBottom = true; // reset on task switch
+
+  content.addEventListener('scroll', _onScroll, { passive: true });
+}
+
+function _onScroll() {
+  if (!_scrollContainer) return;
+  _userNearBottom = _isNearBottom(_scrollContainer);
+}
+
+// Called after new events are appended — scrolls only if user is near bottom
+function _maybeScrollToBottom() {
+  var content = _getScrollContainer();
+  if (content && _userNearBottom) {
+    _scrollToBottom(content);
+  }
+}
+
+// Initialize scroll tracking after phase-content swaps
+document.addEventListener('htmx:afterSettle', function(evt) {
+  var tid = evt.detail.target.id;
+  if (tid === 'phase-content') {
+    _initScrollTracking();
+    // Scroll to bottom on initial load / task switch
+    var content = _getScrollContainer();
+    if (content) _scrollToBottom(content);
+  }
+});
+_initScrollTracking();
+
+// Highlight active task card when phase view loads
 document.addEventListener('htmx:beforeSwap', function(evt) {
   if (evt.detail.target.id !== 'phase-content') return;
-  const m = evt.detail.requestConfig.path.match(/^\/tasks\/([^/?]+)/);
+  var m = evt.detail.requestConfig.path.match(/^\/tasks\/([^/?]+)/);
   if (!m) return;
-  const taskId = m[1];
-  document.querySelectorAll('.task-item').forEach(function(c) {
-    c.classList.toggle('active', c.dataset.taskId === taskId);
-  });
-});
-// Also highlight when a new task is created.
-document.body.addEventListener('load-phase-view', function(evt) {
-  const taskId = evt.detail && (evt.detail.value || evt.detail);
-  if (!taskId) return;
-  document.querySelectorAll('.task-item').forEach(function(c) {
-    c.classList.toggle('active', c.dataset.taskId === taskId);
+  var taskId = m[1];
+  document.querySelectorAll('.task-row').forEach(function(r) {
+    r.classList.toggle('active', r.dataset.taskId === taskId);
   });
 });
 
-// Disable auto-follow when the user manually clicks a task.
+// Disable auto-follow when user manually clicks a task.
 document.addEventListener('htmx:beforeSwap', function(evt) {
-  const elt = evt.detail.elt;
-  // Only disable on user-clicked task items (hx-get on .task-item or its child)
+  var elt = evt.detail.elt;
   if (elt && elt.closest && elt.closest('[data-task-id]') &&
       !elt.closest('#task-list')?.dataset?.batchLoading) {
     autoFollowNewTask = false;
   }
 });
+
+// ── Task hover tooltip ──────────────────────────────────────────
+var _tooltip = null;
+var _tooltipTimeout = null;
+var _tooltipRow = null;
+
+function _ensureTooltip() {
+  if (_tooltip) return;
+  _tooltip = document.createElement('div');
+  _tooltip.className = 'task-tooltip';
+  _tooltip.id = 'task-tooltip';
+  document.body.appendChild(_tooltip);
+}
+
+function _esc(s) {
+  var d = document.createElement('div');
+  d.textContent = (s || '');
+  return d.innerHTML;
+}
+
+function positionTooltip(row) {
+  if (!_tooltip) return;
+  var rowRect = row.getBoundingClientRect();
+  var ttW = _tooltip.offsetWidth;
+  var ttH = _tooltip.offsetHeight;
+  var left = rowRect.right + 10;
+  var top = rowRect.top + rowRect.height / 2 - ttH / 2;
+  if (left + ttW > window.innerWidth - 10) left = rowRect.left - ttW - 10;
+  if (top < 10) top = 10;
+  if (top + ttH > window.innerHeight - 10) top = window.innerHeight - ttH - 10;
+  _tooltip.style.left = left + 'px';
+  _tooltip.style.top = top + 'px';
+}
+
+function showTooltip(evt, row) {
+  if (_tooltipRow === row) return;
+  hideTooltip();
+  _tooltipRow = row;
+  _tooltipTimeout = setTimeout(function() {
+    _ensureTooltip();
+
+    var name = row.dataset.ttName || '';
+    var status = row.dataset.ttStatus || 'queued';
+    var goal = row.dataset.ttGoal || '';
+    var phases = (row.dataset.ttPhases || '').split(',');
+    var current = row.dataset.ttCurrent || 'queued';
+    var iter = row.dataset.ttIter || '0/10';
+
+    var phaseIdx = phases.indexOf(current);
+
+    var phaseDots = phases.map(function(p, i) {
+      var isPast = i < phaseIdx || status === 'done';
+      var isRunning = i === phaseIdx && status === 'running';
+      var isFailed = i === phaseIdx && status === 'failed';
+      var dc = isPast ? 'done' : (isRunning ? 'running' : (isFailed ? 'failed' : ''));
+      var cc = isPast ? ' done' : '';
+      var dot = '<div class="tt-dot ' + dc + '"></div>';
+      var conn = i < phases.length - 1 ? '<div class="tt-connector' + cc + '"></div>' : '';
+      return dot + conn;
+    }).join('');
+
+    _tooltip.className = 'task-tooltip ' + status;
+    _tooltip.innerHTML =
+      '<div class="tt-header">' +
+        '<span class="tt-name">' + _esc(name) + '</span>' +
+        '<span class="tt-status-pill ' + status + '">' + status + '</span>' +
+      '</div>' +
+      '<div class="tt-meta">' +
+        '<code>task/' + _esc(row.dataset.taskId) + '</code>' +
+        '<span style="color:var(--text-dim);">·</span>' +
+        '<span>' + _esc(iter) + ' iter</span>' +
+      '</div>' +
+      '<div class="tt-progress">' + phaseDots + '</div>' +
+      '<div class="tt-goal">' + _esc(goal) + '</div>';
+
+    _tooltip.classList.add('visible');
+    positionTooltip(row);
+  }, 250);
+}
+
+function hideTooltip() {
+  _tooltipRow = null;
+  clearTimeout(_tooltipTimeout);
+  if (_tooltip) _tooltip.classList.remove('visible');
+}
+
+// Dismiss tooltip on scroll
+var _taskList = document.getElementById('task-list');
+if (_taskList) _taskList.addEventListener('scroll', hideTooltip);
+
+// ── Settings button ─────────────────────────────────────────────
+(function() {
+  var btn = document.getElementById('settings-btn');
+  if (btn) {
+    btn.addEventListener('click', function(e) {
+      e.preventDefault();
+      alert('Settings coming in v0.2.\n\nFor v0.1, use env vars:\n' +
+            '  MANGOPI_WEB_PORT=8080\n' +
+            '  MANGOPI_WEB_MODE=mock|real\n' +
+            '  MANGOPI_WEB_MAX_CONCURRENT=3');
+    });
+  }
+})();
 </script>
 {% endblock %}

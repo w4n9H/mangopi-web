@@ -1,0 +1,31 @@
+{# Pipeline + status OOB updates pushed via SSE on phase/status change.
+   Separated from event_fragment so the SSE code can conditionally include it. #}
+<span id="task-status-meta" hx-swap-oob="outerHTML"
+      class="task-status-pill {{ task.status }}">{{ task.status }}</span>
+
+<span id="task-phase-meta" hx-swap-oob="true">
+  {% if task.current_phase %}
+  phase <b style="color: var(--text);">{{ task.current_phase }}</b>
+  {% else %}
+  —
+  {% endif %}
+</span>
+
+<div id="phase-timeline-placeholder" hx-swap-oob="outerHTML"
+     class="phase-timeline" data-current-phase="{{ task.current_phase or '' }}">
+  {% include "partials/phase_pipeline.html" %}
+</div>
+
+<span id="phase-event-count" hx-swap-oob="outerHTML"
+      style="color: var(--text-muted); font-size: 11px;">
+  {% if events_len == 0 and task.status == 'running' %}
+  <span class="streaming"><span class="streaming-dot"></span> Waiting for CLI output…</span>
+  {% else %}
+  {{ events_len }} events
+  {% endif %}
+</span>
+
+{# When task is done/failed, kill the poller by replacing it with a stopped version #}
+{% if task.status in ('done', 'failed') %}
+<div id="phase-pipeline-poll" hx-swap-oob="outerHTML" style="display:none"></div>
+{% endif %}

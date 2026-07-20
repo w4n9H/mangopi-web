@@ -71,9 +71,23 @@ TEMPLATES.env.filters["ago"] = _ago_filter
 DEFAULT_DB = Path(os.environ.get(
     "MANGOPI_WEB_DB",
     str(HERE / ".mangocli" / "web.db")))
-PHASES = ["plan", "develop", "review", "test", "push"]
+PHASES = ["plan", "develop", "review", "test"]  # default pipeline (no --push)
 MAX_CONCURRENT = int(os.environ.get("MANGOPI_WEB_MAX_CONCURRENT", "3"))
-MOCK_MODE = os.environ.get("MANGOPI_WEB_MODE", "mock") == "mock"
+
+
+def compute_phases(push: bool = False, fast: bool = False, wish: bool = False) -> list[str]:
+    """Compute the phase list from mode flags, matching real CLI pipeline."""
+    phases: list[str] = []
+    if wish:
+        phases.append("research")
+    if fast:
+        phases.extend(["develop", "test"])
+    else:
+        phases.extend(["plan", "develop", "review", "test"])
+    if push:
+        phases.append("push")
+    return phases
+MOCK_MODE = os.environ.get("MANGOPI_WEB_MODE") == "mock"
 HOST = os.environ.get("MANGOPI_WEB_HOST", "127.0.0.1")
 PORT = int(os.environ.get("MANGOPI_WEB_PORT", "8080"))
 
@@ -125,6 +139,7 @@ def init_db() -> None:
             max_iter        INTEGER DEFAULT 5,
             cli_ctx_path    TEXT,
             total_usage     TEXT,
+            phases          TEXT DEFAULT '["plan","develop","review","test"]',
             created_at      REAL NOT NULL,
             started_at      REAL,
             finished_at     REAL,
@@ -142,28 +157,49 @@ def init_db() -> None:
         CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
         CREATE INDEX IF NOT EXISTS idx_events_task  ON task_events(task_id, seq);
         """)
+        # Migration: add phases column if missing (v0.1 → v0.1.1)
+        try:
+            c.execute("ALTER TABLE tasks ADD COLUMN phases TEXT DEFAULT '[\"plan\",\"develop\",\"review\",\"test\"]'")
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 
-def insert_task(task_id: str, name: str, goal: str) -> None:
+def insert_task(task_id: str, name: str, goal: str,
+                phases: list[str] | None = None,
+                max_iter: int = 5) -> None:
+    _phases = json.dumps(phases or PHASES)
     with db_conn() as c:
         c.execute("""
-        INSERT INTO tasks (id, name, goal, status, max_iter, created_at)
-        VALUES (?, ?, ?, 'queued', ?, ?)
-        """, (task_id, name, goal, 5, time.time()))
+        INSERT INTO tasks (id, name, goal, status, max_iter, phases, created_at)
+        VALUES (?, ?, ?, 'queued', ?, ?, ?)
+        """, (task_id, name, goal, max_iter, _phases, time.time()))
 
 
 def get_task(task_id: str) -> Optional[dict]:
     with db_conn() as c:
         row = c.execute("SELECT * FROM tasks WHERE id=?",
                         (task_id,)).fetchone()
-        return dict(row) if row else None
+    if row:
+        t = dict(row)
+        try:
+            t["_phases"] = json.loads(t["phases"])
+        except (json.JSONDecodeError, TypeError):
+            t["_phases"] = PHASES
+        return t
+    return None
 
 
 def list_tasks() -> list[dict]:
     with db_conn() as c:
-        return [dict(r) for r in c.execute(
+        tasks = [dict(r) for r in c.execute(
             "SELECT * FROM tasks ORDER BY created_at DESC LIMIT 50"
         ).fetchall()]
+    for t in tasks:
+        try:
+            t["_phases"] = json.loads(t["phases"])
+        except (json.JSONDecodeError, TypeError):
+            t["_phases"] = PHASES
+    return tasks
 
 
 def update_task(task_id: str, **fields: Any) -> None:
@@ -201,22 +237,33 @@ def list_events(task_id: str) -> list[dict]:
 
 # === § 3 CLI runner (Popen + JSONL reader) ============================
 
-def spawn_cli(goal: str, task_id: str) -> subprocess.Popen:
+def spawn_cli(goal: str, task_id: str,
+              push: bool = False, fast: bool = False,
+              wish: bool = False, max_iter: int = 5) -> subprocess.Popen:
     """Spawn the CLI (or mock). Returns the Popen object.
 
     The output protocol is JSONL on stdout, regardless of mode.
     """
     if MOCK_MODE:
         cmd = [sys.executable, str(HERE / "mock" / "fake_cli.py"),
-               "--goal", goal, "--task-id", task_id, "--output", "jsonl"]
+               "--goal", goal, "--task-id", task_id,
+               "--output", "jsonl", "--max-iter", str(max_iter)]
+        if push:
+            cmd.append("--push")
+        if fast:
+            cmd.append("--fast")
+        if wish:
+            cmd.append("--wish")
     else:
-        cli_bin = os.environ.get("MANGOPI_CLI_BIN")
-        if cli_bin:
-            cmd = [cli_bin, "run-loop",
-                   "--goal", goal, "--task-id", task_id, "--output", "jsonl"]
-        else:
-            cmd = [sys.executable, "-m", "mangopi_cli", "run-loop",
-                   "--goal", goal, "--task-id", task_id, "--output", "jsonl"]
+        cmd = [sys.executable, "-m", "mangopi_cli", "loop", goal,
+               "--task-id", task_id, "--output", "jsonl",
+               "--max-iter", str(max_iter)]
+        if push:
+            cmd.append("--push")
+        if fast:
+            cmd.append("--fast")
+        if wish:
+            cmd.append("--wish")
     return subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -308,11 +355,15 @@ def _update_task_state(task_id: str, event: dict) -> None:
                     current_iter=event.get("n", 0),
                     current_phase=event.get("phase"),
                     status="running")
-    elif et == "phase":
-        update_task(task_id, current_phase=event.get("to"))
-    elif et == "complete":
-        update_task(task_id,
-                    total_usage=json.dumps(event.get("total_usage", {})))
+    elif et == "usage":
+        # Accumulate token usage from individual usage events
+        task = get_task(task_id)
+        if task:
+            current = json.loads(task.get("total_usage") or "{}")
+            current["prompt"] = current.get("prompt", 0) + event.get("prompt_tokens", 0)
+            current["completion"] = current.get("completion", 0) + event.get("completion_tokens", 0)
+            current["total"] = current.get("total", 0) + event.get("total", 0)
+            update_task(task_id, total_usage=json.dumps(current))
     elif et == "error":
         # A reader-level error means the reader thread itself crashed — no
         # further events will arrive, so mark the task failed immediately.
@@ -328,30 +379,41 @@ def _update_task_state(task_id: str, event: dict) -> None:
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     return TEMPLATES.TemplateResponse(
-        "index.html", {"request": request, "phases": PHASES})
+        request, "index.html", {"request": request, "phases": PHASES})
 
 
 @app.get("/tasks", response_class=HTMLResponse)
 async def tasks_partial(request: Request) -> HTMLResponse:
     return TEMPLATES.TemplateResponse(
-        "partials/task_list.html",
-        {"request": request, "tasks": list_tasks(), "phases": PHASES})
+        request, "partials/task_list.html",
+        {"request": request, "tasks": list_tasks()})
 
 
 @app.post("/tasks", response_class=HTMLResponse)
 async def create_task(request: Request,
-                      name: str = Form(...),
-                      goal: str = Form(...)) -> HTMLResponse:
+                      goal: str = Form(...),
+                      name: str = Form(""),
+                      mode: str = Form(""),
+                      push: str = Form(""),
+                      max_iter: int = Form(5)) -> HTMLResponse:
+    """Create a new task. `mode`: '' | 'fast' | 'wish'. `push`: 'on' to enable --push."""
+    _push = push == "on"
+    _fast = "fast" in mode
+    _wish = "wish" in mode
     if active_slots.locked():
         raise HTTPException(503, f"queue full, max {MAX_CONCURRENT} concurrent")
 
     await active_slots.acquire()
     task_id = uuid.uuid4().hex[:8]
-    insert_task(task_id, name, goal)
+    if not name.strip():
+        name = goal.strip()[:10] + ("…" if len(goal.strip()) > 10 else "")
+    _phases = compute_phases(push=_push, fast=_fast, wish=_wish)
+    insert_task(task_id, name, goal, phases=_phases, max_iter=max_iter)
     loop = asyncio.get_running_loop()
 
     try:
-        proc = spawn_cli(goal, task_id)
+        proc = spawn_cli(goal, task_id, push=_push, fast=_fast, wish=_wish,
+                         max_iter=max_iter)
         _processes[task_id] = proc
         update_task(task_id, status="running", started_at=time.time())
         start_reader_thread(proc, task_id, loop)
@@ -363,8 +425,8 @@ async def create_task(request: Request,
 
     task = get_task(task_id)
     response = TEMPLATES.TemplateResponse(
-        "partials/task_item.html",
-        {"request": request, "task": task, "phases": PHASES})
+        request, "partials/task_item.html",
+        {"request": request, "task": task, "phases": task["_phases"]})
     # Fire a client-side event that auto-loads this task's phase view
     # into the Main area. Keeps sidebar and Main in sync from the moment
     # of creation without coupling the two responses.
@@ -393,11 +455,7 @@ async def delete_task(task_id: str) -> Response:
 
     # Release concurrency slot if the task held one
     if t.get("status") in ("running", "queued"):
-        try:
-            active_slots.release()
-        except ValueError:
-            pass
-        _released_slots.discard(task_id)
+        await _release_slot_async(task_id)
 
     # Clean up event bus
     event_bus.pop(task_id, None)
@@ -426,8 +484,27 @@ async def advance_task(request: Request, task_id: str) -> HTMLResponse:
     if not t:
         raise HTTPException(404, "task not found")
     return TEMPLATES.TemplateResponse(
-        "partials/task_item_oob.html",
-        {"request": request, "task": t, "phases": PHASES})
+        request, "partials/task_item_oob.html",
+        {"request": request, "task": t, "phases": t["_phases"]})
+
+
+@app.get("/tasks/{task_id}/pipeline-oob", response_class=HTMLResponse)
+async def pipeline_oob(request: Request, task_id: str) -> HTMLResponse:
+    """Return OOB-only pipeline + status/phase meta updates via polling.
+    
+    Used by the phase view's periodic poller (hx-trigger="every 2s").
+    The response contains only OOB elements — hx-swap="none" on the
+    caller means the main content is discarded, but OOB attrs are
+    still processed by htmx.
+    """
+    t = get_task(task_id)
+    if not t:
+        raise HTTPException(404, "task not found")
+    events_len = len(list_events(task_id))
+    return TEMPLATES.TemplateResponse(
+        request, "partials/pipeline_oob.html",
+        {"request": request, "task": t, "events_len": events_len,
+         "phases": t["_phases"]})
 
 
 @app.get("/tasks/{task_id}", response_class=HTMLResponse)
@@ -450,19 +527,68 @@ async def task_detail(request: Request, task_id: str) -> HTMLResponse:
                 last_seq = 0
             events = [e for e in events if e["seq"] > last_seq]
         return TEMPLATES.TemplateResponse(
-            "partials/task_phase_view.html",
+            request, "partials/task_phase_view.html",
             {"request": request, "task": t,
-             "events": events, "phases": PHASES})
+             "events": events, "phases": t["_phases"]})
     # Direct browser navigation gets the full standalone detail page.
     return TEMPLATES.TemplateResponse(
-        "partials/task_detail.html",
+        request, "partials/task_detail.html",
         {"request": request, "task": t,
-         "events": events, "phases": PHASES})
+         "events": events, "phases": t["_phases"]})
+
+
+def _render_event_html(event: dict, task: dict, last_stage: str = "") -> str:
+    """Render a single event as an HTML fragment.
+
+    Normalizes the event format: queue events are raw JSON objects
+    (top-level fields), while list_events() returns rows with type+payload
+    columns.  The template expects the DB format (payload field).
+    """
+    # Normalize queue events to DB format
+    if "payload" not in event:
+        normalized = {
+            "type": event.get("type", "unknown"),
+            "seq": event.get("_seq", 0),
+            "payload": json.dumps(event, ensure_ascii=False)
+        }
+    else:
+        normalized = event
+    try:
+        html = TEMPLATES.get_template("partials/event_fragment.html").render(
+            event=normalized, last_stage=last_stage)
+    except Exception:
+        html = ""
+    return html
+
+
+def _render_pipeline_oob(task: dict, events_len: int) -> str:
+    """Render pipeline/status OOB updates for SSE push on phase/status change."""
+    try:
+        html = TEMPLATES.get_template("partials/pipeline_oob.html").render(
+            task=task, events_len=events_len,
+            phases=task.get("_phases", PHASES))
+    except Exception:
+        html = ""
+    return html
+
+
+def _sse_data(html: str) -> str:
+    """Convert multi-line HTML to SSE data: format."""
+    if not html:
+        return "data: \n"
+    lines = html.split("\n")
+    return "\n".join(f"data: {line}" for line in lines)
 
 
 @app.get("/events/{task_id}")
 async def sse_stream(task_id: str) -> StreamingResponse:
-    """Per-task live SSE stream. No replay by default (v0.2)."""
+    """Per-task live SSE stream — pushes rendered HTML fragments directly.
+
+    Each event is rendered server-side and pushed as `event: event\n` +
+    multi-line `data:`. The frontend JavaScript EventSource listener
+    appends fragments to #phase-events-list via insertAdjacentHTML.
+    Pipeline/status updates are handled by the separate polling endpoint.
+    """
     t = get_task(task_id)
     if not t:
         raise HTTPException(404, "task not found")
@@ -472,42 +598,79 @@ async def sse_stream(task_id: str) -> StreamingResponse:
 
     async def gen():
         try:
-            # If the task already finished, there is nothing to stream live.
-            # Skip the heartbeat so the browser EventSource never opens —
-            # this prevents the infinite reconnect loop for completed tasks.
             if t.get("status") in ("done", "failed"):
                 return
-            yield ": connected\n\n"  # initial heartbeat (only for active tasks)
+            yield ": connected\n\n"
 
-            # Replay events that were persisted before this SSE client
-            # connected.  The reader thread starts immediately while the
-            # browser may take a few hundred ms to establish the SSE
-            # connection — without a catch-up replay those early events
-            # would be silently lost.
+            # Skip replay — the initial page load already renders all
+            # existing events.  SSE only pushes events that arrive *after*
+            # the connection is established (avoiding duplicates).
             last_seq = 0
-            for ev in list_events(task_id):
-                last_seq = ev["seq"]
-                yield f"event: {ev['type']}\ndata: {ev['payload']}\n\n"
+            existing = list_events(task_id)
+            if existing:
+                last_seq = existing[-1]["seq"]
 
-            # Now stream live events, skipping anything we already
-            # replayed above (identified by the _seq tag).
+            # Determine last_stage from existing events so stage headers
+            # render correctly for the first live event.
+            last_stage = ""
+            for ev in existing:
+                if ev["type"] == "iter":
+                    try:
+                        p = json.loads(ev["payload"])
+                        agent = p.get("agent", "")
+                        phase = p.get("phase", "")
+                        new_stage = "Updater" if agent == "updater" else {
+                            "research": "Researcher", "plan": "Implementer",
+                            "develop": "Implementer", "review": "Verifier",
+                            "test": "Verifier", "push": "Push"
+                        }.get(phase, "")
+                        if new_stage:
+                            last_stage = new_stage
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+
+            events_len = len(existing)
+
+            # Stream live events
             while True:
                 event = await queue.get()
-                if event.get("_seq", 0) > last_seq:
-                    yield f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-                    last_seq = event["_seq"]
+                if event.get("_seq", 0) <= last_seq:
+                    if event["type"] in ("exit", "complete"):
+                        break
+                    continue
+
+                last_seq = event["_seq"]
+                html = _render_event_html(event, t, last_stage)
+
+                # Track stage for stage-header rendering on next event
+                if event["type"] == "iter":
+                    try:
+                        agent = event.get("agent", "")
+                        phase = event.get("phase", "")
+                        new_stage = "Updater" if agent == "updater" else {
+                            "research": "Researcher", "plan": "Implementer",
+                            "develop": "Implementer", "review": "Verifier",
+                            "test": "Verifier", "push": "Push"
+                        }.get(phase, "")
+                        if new_stage and new_stage != last_stage:
+                            last_stage = new_stage
+                    except Exception:
+                        pass
+
+                events_len += 1
+                if html:
+                    yield f"event: event\n{_sse_data(html)}\n\n"
+
+                # On complete/exit, send close event
                 if event["type"] in ("exit", "complete"):
+                    yield "event: close\ndata: \n\n"
                     break
+
         finally:
             try:
                 lst = event_bus[task_id]
                 lst.remove(queue)
                 if not lst:
-                    # All subscribers gone. If the task is finished the
-                    # reader thread has exited and we can safely delete
-                    # the bus entry; otherwise keep it so that a new
-                    # subscriber can re-attach to the same list the
-                    # reader thread is still fanning out to.
                     task = get_task(task_id)
                     if task and task.get("status") in ("done", "failed"):
                         try:
@@ -535,6 +698,31 @@ async def health() -> JSONResponse:
         "active": MAX_CONCURRENT - active_slots._value,
         "max_concurrent": MAX_CONCURRENT,
     })
+
+
+@app.get("/api/heatmap")
+async def heatmap() -> JSONResponse:
+    """Daily task creation counts for the last 4 weeks (heatmap)."""
+    cutoff = time.time() - 84 * 86400  # 12 weeks for 12×7 heatmap
+    with db_conn() as c:
+        rows = c.execute("""
+            SELECT date(created_at, 'unixepoch') AS day,
+                   COUNT(*) AS count
+            FROM tasks
+            WHERE created_at > ?
+            GROUP BY day
+            ORDER BY day
+        """, (cutoff,)).fetchall()
+    data = {r["day"]: r["count"] for r in rows}
+    # Fill in missing days with 0
+    result = {}
+    for i in range(83, -1, -1):
+        day = time.strftime("%Y-%m-%d", time.localtime(time.time() - i * 86400))
+        result[day] = data.get(day, 0)
+    return JSONResponse([
+        {"date": day, "count": result[day]}
+        for day in sorted(result)
+    ])
 
 
 # === § 5 API: Workspace & Git (v0.1.2) ================================
