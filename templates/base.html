@@ -718,12 +718,31 @@
     border-left: 2px solid var(--orange);
     border-radius: 0 5px 5px 0;
   }
+  .thinking-block.collapsed .thinking-text {
+    display: none;
+  }
   .thinking-label {
     font-size: 9px;
     color: var(--orange);
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .thinking-label:hover {
+    opacity: 0.8;
+  }
+  .thinking-label::before {
+    content: '▶';
+    font-size: 7px;
+    transition: transform 0.15s;
+  }
+  .thinking-block:not(.collapsed) .thinking-label::before {
+    content: '▼';
   }
   .thinking-text {
     font-size: 11px;

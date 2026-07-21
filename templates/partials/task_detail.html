@@ -101,8 +101,8 @@
           </div>
 
         {% elif ev.type == 'thinking' %}
-          <div class="thinking-block" data-event-seq="{{ ev.seq }}">
-            <div class="thinking-label">Thinking</div>
+          <div class="thinking-block collapsed" data-event-seq="{{ ev.seq }}">
+            <div class="thinking-label" onclick="this.closest('.thinking-block').classList.toggle('collapsed')">Thinking</div>
             <div class="thinking-text">{{ p.content|default('') }}</div>
           </div>
 

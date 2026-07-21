@@ -50,7 +50,7 @@
   {% set _stage_map = {"research":"Researcher", "plan":"Implementer", "develop":"Implementer",
                         "review":"Verifier", "test":"Verifier",
                         "push":"Push"} %}
-  {% for ev in events %}
+  {% for ev in events | reverse %}
     {% set p = ev.payload|from_json %}
 
     {# ── iter ── #}
@@ -99,8 +99,8 @@
 
     {# ── thinking ── #}
     {% elif ev.type == 'thinking' %}
-      <div class="thinking-block" data-event-seq="{{ ev.seq }}">
-        <div class="thinking-label">Thinking</div>
+      <div class="thinking-block collapsed" data-event-seq="{{ ev.seq }}">
+        <div class="thinking-label" onclick="this.closest('.thinking-block').classList.toggle('collapsed')">Thinking</div>
         <div class="thinking-text">{{ p.content|default('') }}</div>
       </div>
 
@@ -167,8 +167,13 @@
     var html = e.data;
     if (!html) return;
 
-    // Append the HTML fragment to the events list
-    list.insertAdjacentHTML('beforeend', html);
+    // Prepend the HTML fragment after the header card (newest stays on top)
+    var header = list.querySelector('.phase-header-card');
+    if (header) {
+      header.insertAdjacentHTML('afterend', html);
+    } else {
+      list.insertAdjacentHTML('afterbegin', html);
+    }
 
     // Update seq tracking
     var matches = html.match(/data-event-seq="(\d+)"/g);
@@ -185,9 +190,9 @@
     var cnt = document.getElementById('phase-event-count');
     if (cnt) cnt.textContent = eventCount + ' events';
 
-    // Smart auto-scroll: only follows if user hasn't scrolled up
-    if (typeof _maybeScrollToBottom === 'function') {
-      _maybeScrollToBottom();
+    // Smart auto-scroll: only follows if user hasn't scrolled down
+    if (typeof _maybeScrollToTop === 'function') {
+      _maybeScrollToTop();
     }
   });
 
@@ -207,9 +212,9 @@
     var cnt = document.getElementById('phase-event-count');
     if (cnt) cnt.textContent = eventCount + ' events';
 
-    // Final scroll to bottom (user was following the stream)
-    if (typeof _maybeScrollToBottom === 'function') {
-      setTimeout(_maybeScrollToBottom, 100);
+    // Final scroll to top (user was following the stream at the top)
+    if (typeof _maybeScrollToTop === 'function') {
+      setTimeout(_maybeScrollToTop, 100);
     }
   });
 

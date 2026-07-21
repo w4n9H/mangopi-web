@@ -445,10 +445,11 @@ document.body.addEventListener('load-phase-view', function(evt) {
   });
 });
 
-// ── Smart auto-scroll ➔ bottom ──────────────────────────────────────
-// Tracks whether the user is near the bottom of the event log.
-// Only auto-scrolls when the user hasn't scrolled up to read history.
-var _userNearBottom = true;
+// ── Smart auto-scroll ➔ top ─────────────────────────────────────────
+// Tracks whether the user is near the top of the event log.
+// Only auto-scrolls when the user hasn't scrolled down to read history.
+// This works with the reversed event order (newest at top).
+var _userNearTop = true;
 var _scrollContainer = null;
 
 function _getScrollContainer() {
@@ -456,17 +457,17 @@ function _getScrollContainer() {
   return document.getElementById('phase-content');
 }
 
-function _isNearBottom(el, threshold) {
+function _isNearTop(el, threshold) {
   threshold = threshold || 80;
-  return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  return el.scrollTop < threshold;
 }
 
-function _scrollToBottom(el) {
+function _scrollToTop(el) {
   // Double rAF: first frame lets the browser layout the new content,
   // second frame ensures scrollHeight is accurate before we read it.
   requestAnimationFrame(function() {
     requestAnimationFrame(function() {
-      el.scrollTop = el.scrollHeight;
+      el.scrollTop = 0;
     });
   });
 }
@@ -482,21 +483,21 @@ function _initScrollTracking() {
   }
 
   _scrollContainer = content;
-  _userNearBottom = true; // reset on task switch
+  _userNearTop = true; // reset on task switch
 
   content.addEventListener('scroll', _onScroll, { passive: true });
 }
 
 function _onScroll() {
   if (!_scrollContainer) return;
-  _userNearBottom = _isNearBottom(_scrollContainer);
+  _userNearTop = _isNearTop(_scrollContainer);
 }
 
-// Called after new events are appended — scrolls only if user is near bottom
-function _maybeScrollToBottom() {
+// Called after new events are prepended — scrolls only if user is near top
+function _maybeScrollToTop() {
   var content = _getScrollContainer();
-  if (content && _userNearBottom) {
-    _scrollToBottom(content);
+  if (content && _userNearTop) {
+    _scrollToTop(content);
   }
 }
 
@@ -505,9 +506,9 @@ document.addEventListener('htmx:afterSettle', function(evt) {
   var tid = evt.detail.target.id;
   if (tid === 'phase-content') {
     _initScrollTracking();
-    // Scroll to bottom on initial load / task switch
+    // Scroll to top on initial load / task switch (newest events at top)
     var content = _getScrollContainer();
-    if (content) _scrollToBottom(content);
+    if (content) _scrollToTop(content);
   }
 });
 _initScrollTracking();

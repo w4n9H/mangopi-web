@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""mangopi-web · Task-driven SPA over htmx + FastAPI + Jinja2.
-
-v0.1: mock-mode only (real CLI wired in v0.1.1).
-Architecture: subprocess + JSONL over stdout. See design doc.
-
-§ 1 Imports & app setup
-§ 2 DB layer (sqlite3)
-§ 3 CLI runner (Popen + JSONL reader thread)
-§ 4 Routes (FastAPI endpoints)
-§ 5 Auth placeholder (v0.2)
-§ 6 CLI entry
-"""
 from __future__ import annotations
-
 import argparse
 import asyncio
 import json
@@ -31,6 +18,12 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+
+__version__ = "0.1.0"
+__author__ = "moofs"
+__license__ = "Apache License 2.0"
+
 
 # === § 1 Imports & app setup ===========================================
 
@@ -255,7 +248,7 @@ def spawn_cli(goal: str, task_id: str,
         if wish:
             cmd.append("--wish")
     else:
-        cmd = [sys.executable, "-m", "mangopi_cli", "loop", goal,
+        cmd = [sys.executable, "-m", "mangopi_cli", "--yolo", "loop", goal,
                "--task-id", task_id, "--output", "jsonl",
                "--max-iter", str(max_iter)]
         if push:
@@ -406,7 +399,7 @@ async def create_task(request: Request,
     await active_slots.acquire()
     task_id = uuid.uuid4().hex[:8]
     if not name.strip():
-        name = goal.strip()[:10] + ("…" if len(goal.strip()) > 10 else "")
+        name = goal.strip()[:20] + ("…" if len(goal.strip()) > 20 else "")
     _phases = compute_phases(push=_push, fast=_fast, wish=_wish)
     insert_task(task_id, name, goal, phases=_phases, max_iter=max_iter)
     loop = asyncio.get_running_loop()
@@ -883,8 +876,10 @@ def mock_commits() -> list[dict]:
 
 # === § 6 CLI entry ====================================================
 
-if __name__ == "__main__":
+def main():
     import uvicorn
+
+    global MOCK_MODE, DEFAULT_DB, HOST, PORT
 
     parser = argparse.ArgumentParser(description="mangopi-web · task-driven loop_engine UI")
     parser.add_argument("--host", default=HOST,
@@ -908,3 +903,7 @@ if __name__ == "__main__":
     PORT = args.port
 
     uvicorn.run(app, host=HOST, port=PORT, log_level="info")
+
+
+if __name__ == '__main__':
+    main()
