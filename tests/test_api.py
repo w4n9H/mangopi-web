@@ -24,12 +24,12 @@ async def _sse_read_until_close(task_id: str) -> list[bytes]:
     """Connect to /events/{task_id} over ASGI, push a terminal event,
     and collect all SSE data lines until 'event: close' is received.
 
-    Using ``httpx.AsyncClient`` + ``ASGITransport`` avoids the deadlock
-    that ``TestClient.stream()`` suffers from: ``portal.call()`` blocks
-    until the full body is consumed, but an SSE generator never completes
-    on its own — it awaits ``queue.get()`` forever.  With the async
-    client the response body is consumed lazily via ``aiter_lines()``,
-    giving us a chance to push a queue item from the same coroutine.
+    Reader and pusher run as **separate concurrent tasks** via
+    ``anyio.create_task_group()``.  This avoids the deadlock that would
+    occur if a single coroutine both read the stream and pushed the
+    queue item: the generator awaits ``queue.get()``, the stream read
+    awaits the generator's output — a cycle that the event loop can
+    never break.
     """
     lines: list[bytes] = []
     transport = ASGITransport(app=app)
@@ -37,16 +37,23 @@ async def _sse_read_until_close(task_id: str) -> list[bytes]:
         async with client.stream("GET", f"/events/{task_id}") as resp:
             assert resp.status_code == 200
             assert "text/event-stream" in resp.headers.get("content-type", "")
-            async for line in resp.aiter_lines():
-                lines.append(line.encode())
-                # After receiving any line, push the terminal event
-                # so the async generator breaks out of queue.get()
+
+            async def reader():
+                async for line in resp.aiter_lines():
+                    lines.append(line.encode())
+                    if b"event: close" in lines[-1]:
+                        break
+
+            async def pusher():
+                # Brief nap so the SSE connection handshake completes
+                await anyio.sleep(0.05)
                 q = event_bus.get(task_id)
                 if q:
                     q[0].put_nowait({"type": "complete", "_seq": 999})
-                # Stop once we see the close event
-                if b"event: close" in lines[-1]:
-                    break
+
+            async with anyio.create_task_group() as tg:
+                tg.start_soon(reader)
+                tg.start_soon(pusher)
     return lines
 
 

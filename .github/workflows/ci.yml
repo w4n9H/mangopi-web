@@ -1,4 +1,4 @@
- mangopi-web · CI/CD
+# mangopi-web · CI/CD
 #
 # This workflow does two things:
 #   1. On every PR / push to main: run the test suite across Python 3.9 - 3.12
