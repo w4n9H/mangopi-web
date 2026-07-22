@@ -1,4 +1,4 @@
-# mangopi-web · CI/CD
+ mangopi-web · CI/CD
 #
 # This workflow does two things:
 #   1. On every PR / push to main: run the test suite across Python 3.9 - 3.12
@@ -76,6 +76,11 @@ jobs:
         run: |
           python -m py_compile mangopi_web/__init__.py && echo "✅ syntax OK"
 
+      - name: Install dependencies
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet fastapi uvicorn jinja2 "httpx>=0.24"
+
       - name: Smoke test · module imports cleanly
         run: |
           python -c "import mangopi_web; print(f'✅ mangopi-web v{mangopi_web.__version__} imports cleanly')"
@@ -88,11 +93,6 @@ jobs:
         run: |
           python -m pip install --quiet -e .
           command -v mangopi-web >/dev/null && echo "✅ mangopi-web entry point installed" || echo "❌ mangopi-web not on PATH"
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --quiet --upgrade pip
-          python -m pip install --quiet fastapi uvicorn jinja2 "httpx>=0.24"
 
       - name: Run tests
         run: |
