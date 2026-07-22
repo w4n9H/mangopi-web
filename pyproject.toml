@@ -25,6 +25,9 @@ dependencies = [
     "mangopi-cli>=0.1.0"
 ]
 
+[project.optional-dependencies]
+test = ["httpx"]
+
 [project.urls]
 Homepage = "https://github.com/w4n9H/mangopi-web"
 
@@ -35,4 +38,7 @@ mangopi-web = "mangopi_web:main"
 version = {attr = "mangopi_web.__version__"}
 
 [tool.setuptools]
-py-modules = ["mangopi_web"]
+packages = ["mangopi_web"]
+
+[tool.setuptools.package-data]
+mangopi_web = ["templates/**/*", "static/**/*", "mock/**/*"]

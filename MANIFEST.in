@@ -1,0 +1,3 @@
+recursive-include mangopi_web/templates *
+recursive-include mangopi_web/static *
+recursive-include mangopi_web/mock *

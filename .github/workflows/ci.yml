@@ -1,0 +1,189 @@
+# mangopi-web · CI/CD
+#
+# This workflow does two things:
+#   1. On every PR / push to main: run the test suite across Python 3.9 - 3.12
+#   2. On every tag matching v*: build sdist + wheel, publish to PyPI
+#
+# ════════════════════════════════════════════════════════════════════════
+# ONE-TIME SETUP (do this once before the workflow can publish)
+# ════════════════════════════════════════════════════════════════════════
+#
+# PyPI Trusted Publishing (OIDC — no API tokens to manage):
+#   1. Go to https://pypi.org/manage/account/publishing/
+#   2. Click "Add a new pending publisher" and fill in:
+#        Owner:         w4n9H
+#        Repository:    mangopi-web
+#        Workflow file: ci.yml
+#        Environment:   pypi
+#   3. Save.
+#
+# ════════════════════════════════════════════════════════════════════════
+# HOW TO RELEASE A NEW VERSION
+# ════════════════════════════════════════════════════════════════════════
+#
+#   1. Bump __version__ in mangopi_web/__init__.py
+#   2. Update CHANGELOG.md
+#   3. Commit & push:
+#        git add mangopi_web/__init__.py CHANGELOG.md
+#        git commit -m "release: v0.X.Y"
+#        git tag v0.X.Y
+#        git push origin main --tags
+#   4. GitHub Actions takes over: tests → build → PyPI → GitHub Release
+#
+# ════════════════════════════════════════════════════════════════════════
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # 1. TEST  — runs on every PR and every push to main
+  # ─────────────────────────────────────────────────────────────
+  test:
+    name: Test · Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Show environment
+        run: |
+          python --version
+          pip --version
+
+      - name: Syntax check
+        run: |
+          python -m py_compile mangopi_web/__init__.py && echo "✅ syntax OK"
+
+      - name: Smoke test · module imports cleanly
+        run: |
+          python -c "import mangopi_web; print(f'✅ mangopi-web v{mangopi_web.__version__} imports cleanly')"
+
+      - name: Verify version
+        run: |
+          echo "Current version: $(python -c 'import mangopi_web; print(mangopi_web.__version__)')"
+
+      - name: Smoke test · `mangopi-web` entry point exists
+        run: |
+          python -m pip install --quiet -e .
+          command -v mangopi-web >/dev/null && echo "✅ mangopi-web entry point installed" || echo "❌ mangopi-web not on PATH"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet starlette uvicorn jinja2 "httpx>=0.24"
+
+      - name: Run tests
+        run: |
+          echo "▶ Running unittest-style tests"
+          python -m unittest discover -s tests -p "*.py" -v
+
+  # ─────────────────────────────────────────────────────────────
+  # 2. BUILD & PUBLISH  — runs only on tag pushes (v*)
+  # ─────────────────────────────────────────────────────────────
+  build-and-publish:
+    name: Build & Publish · ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      id-token: write
+      contents: write
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/mangopi-web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Tag version: $VERSION"
+
+      - name: Verify version matches tag
+        run: |
+          PKG_VERSION=$(python -c "import mangopi_web; print(mangopi_web.__version__)")
+          TAG_VERSION="${{ steps.version.outputs.VERSION }}"
+          echo "mangopi_web.__version__: $PKG_VERSION"
+          echo "Git tag:                 v$TAG_VERSION"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "❌ Version mismatch — tag=v$TAG_VERSION but mangopi_web.__version__=$PKG_VERSION"
+            exit 1
+          fi
+          echo "✅ Versions match: $PKG_VERSION"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Verify build with twine check
+        run: |
+          ls -la dist/
+          twine check dist/*
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mangopi-web-${{ steps.version.outputs.VERSION }}-dist
+          path: dist/
+          retention-days: 14
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Create GitHub Release (optional)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes "See [CHANGELOG.md](../blob/main/CHANGELOG.md) for details." \
+            dist/* 2>/dev/null || \
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes "See [CHANGELOG.md](../blob/main/CHANGELOG.md) for details."
+
+# ════════════════════════════════════════════════════════════════════════
+# Add this badge to README.md after the workflow is merged:
+#
+#   [![CI](https://github.com/w4n9H/mangopi-web/actions/workflows/ci.yml/badge.svg)](https://github.com/w4n9H/mangopi-web/actions/workflows/ci.yml)
+#
+# ════════════════════════════════════════════════════════════════════════

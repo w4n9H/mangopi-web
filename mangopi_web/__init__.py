@@ -63,7 +63,7 @@ TEMPLATES.env.filters["ago"] = _ago_filter
 
 DEFAULT_DB = Path(os.environ.get(
     "MANGOPI_WEB_DB",
-    str(HERE / ".mangocli" / "web.db")))
+    str(Path.cwd() / ".mangocli" / "web.db")))
 PHASES = ["plan", "develop", "review", "test"]  # default pipeline (no --push)
 MAX_CONCURRENT = int(os.environ.get("MANGOPI_WEB_MAX_CONCURRENT", "3"))
 
