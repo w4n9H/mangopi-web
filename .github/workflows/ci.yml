@@ -92,7 +92,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --quiet --upgrade pip
-          python -m pip install --quiet starlette uvicorn jinja2 "httpx>=0.24"
+          python -m pip install --quiet fastapi uvicorn jinja2 "httpx>=0.24"
 
       - name: Run tests
         run: |
