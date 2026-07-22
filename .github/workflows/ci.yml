@@ -134,6 +134,7 @@ jobs:
 
       - name: Verify version matches tag
         run: |
+          python -m pip install --quiet fastapi uvicorn jinja2 python-multipart "httpx>=0.24"
           PKG_VERSION=$(python -c "import mangopi_web; print(mangopi_web.__version__)")
           TAG_VERSION="${{ steps.version.outputs.VERSION }}"
           echo "mangopi_web.__version__: $PKG_VERSION"
