@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-07-24
+
+### Changed
+
+- **UI redesign for readability** — Overhauled both light and dark themes with WCAG AA-compliant contrast (≥4.5:1 on all text), a 4-step type scale (11/12/13/14px) that eliminates all 7–10px text, and looser event-stream spacing for less visual crowding
+- **Light theme softened** — Replaced pure-white cards with warm paper tones (`#fcfcfa`) and eased body text from ~15:1 to ~11.5:1 contrast to cut screen glare during long sessions
+- **Dark theme lifted** — Raised background to `#1a1a18` and cards to `#222220` to separate layers and make dim text (now `#908d86`) readable instead of near-invisible
+- **Semantic colors disentangled** — Orange now means "running" only; cyan marks tool calls; success stays green; token counts and commit messages inherit body color
+- Split shadows per-theme, widened scrollbars (5px → 8px), and replaced the stage-header double bars with a single colored accent bar
+- Responsive layout no longer shrinks font sizes on small screens — it hides secondary text (`.phase-status`, `.tool-args`) instead
+
+### Fixed
+
+- Anti-FOUC — theme is now resolved from `localStorage` before first paint (previously light-mode users saw a dark flash on load)
+
+---
+
 ## [0.1.0] - 2026-07-20
 
 ### Added
@@ -45,51 +62,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - Static polling fallback for live events (replaced by SSE)
-
----
-
-## [0.0.3] - 2026-07-20
-
-### Added
-
-- Event fragment partial (`event_fragment.html`) for unified event rendering
-- Pipeline OOB partial (`pipeline_oob.html`) for out-of-band status updates
-- Responsive layout improvements
-
-### Changed
-
-- Major UI overhaul — streamlined phase view, improved card design, and consistent spacing
-- SSE client rewritten for robustness and reconnection handling
-- Task item and detail templates refactored for OOB swapping
-
-### Fixed
-
-- SSE connection torn down on every event due to full-card replacement — now only OOB elements are swapped
-
-## [0.0.2] - 2026-07-03
-
-### Added
-
-- Theme toggle (dark/light mode) with system preference detection
-- Sidebar dashboard with task list and status summary
-- Thinking and output event types rendered with distinct styling
-- Auto-follow — event log automatically scrolls to the latest entry
-- Mock CLI enhancements — more realistic tool call simulation
-
-### Changed
-
-- Base template refactored for sidebar + main layout
-- Phase view improved with auto-follow toggle and better event grouping
-
-## [0.0.1] - 2026-07-02
-
-### Added
-
-- Initial project structure with FastAPI application
-- Basic task creation and listing via HTMX
-- Mock CLI for development without real API keys
-- Static assets bundled (HTMX, Alpine.js, SSE polyfill)
-- Template partials for task items, phase pipeline, and detail view
-- SQLite schema for tasks and events
-- Basic polling-based live updates
-- CLI entry point with `--host`, `--port`, `--mock`, and `--db` arguments

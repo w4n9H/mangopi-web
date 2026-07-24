@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __author__ = "moofs"
 __license__ = "Apache License 2.0"
 
